@@ -1,0 +1,37 @@
+# LLM
+google-genai
+
+# 配置解析
+pyyaml
+python-dotenv
+
+# RSS/Atom 解析
+feedparser
+
+# Notion API
+notion-client
+
+# 日期时间处理
+python-dateutil
+
+# HTTP 请求（某些 RSS 源可能需要）
+requests
+
+# 终端输入与剪贴板工具
+prompt_toolkit
+pyperclip
+
+# 金融数据（DXY 工具需要）
+yfinance
+pandas
+numpy
+plotly
+
+# 浏览器自动化（小红书/抖音工具需要）
+playwright
+
+# 提醒事项（macOS Reminders 工具需要）
+pyobjc-framework-EventKit
+
+# 终端图片显示
+term-image

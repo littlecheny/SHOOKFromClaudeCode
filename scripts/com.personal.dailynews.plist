@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 任务标识符（唯一） -->
+    <key>Label</key>
+    <string>com.personal.dailynews</string>
+    
+    <!-- 程序路径和参数 -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/node</string>
+        <string>/Users/chenyulin/workspace/workdoc/dist/runtime/cli.js</string>
+        <string>--exec</string>
+        <string>/get-news</string>
+    </array>
+    
+    <!-- 工作目录 -->
+    <key>WorkingDirectory</key>
+    <string>/Users/chenyulin/workspace/workdoc</string>
+    
+    <!-- 环境变量（从 .env 文件加载，或者直接在这里设置） -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- 注意：敏感信息不应直接写在这里，建议通过 .env 文件或钥匙串管理 -->
+        <key>LOG_LEVEL</key>
+        <string>INFO</string>
+    </dict>
+    
+    <!-- 定时触发：工作日（周一至周五）10:00 -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <!-- 周一 -->
+        <dict>
+            <key>Weekday</key>
+            <integer>1</integer>
+            <key>Hour</key>
+            <integer>10</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <!-- 周二 -->
+        <dict>
+            <key>Weekday</key>
+            <integer>2</integer>
+            <key>Hour</key>
+            <integer>10</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <!-- 周三 -->
+        <dict>
+            <key>Weekday</key>
+            <integer>3</integer>
+            <key>Hour</key>
+            <integer>10</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <!-- 周四 -->
+        <dict>
+            <key>Weekday</key>
+            <integer>4</integer>
+            <key>Hour</key>
+            <integer>10</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <!-- 周五 -->
+        <dict>
+            <key>Weekday</key>
+            <integer>5</integer>
+            <key>Hour</key>
+            <integer>10</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+    </array>
+    
+    <!-- 标准输出日志 -->
+    <key>StandardOutPath</key>
+    <string>/Users/chenyulin/workspace/workdoc/logs/dailynews.out.log</string>
+    
+    <!-- 标准错误日志 -->
+    <key>StandardErrorPath</key>
+    <string>/Users/chenyulin/workspace/workdoc/logs/dailynews.err.log</string>
+    
+    <!-- 如果任务失败，不自动重启 -->
+    <key>RunAtLoad</key>
+    <false/>
+    
+    <!-- 任务执行完成后退出 -->
+    <key>KeepAlive</key>
+    <false/>
+</dict>
+</plist>

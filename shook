@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "[shook] 需要 Node.js 环境，请先安装 Node。" >&2
+  exit 1
+fi
+
+if [[ ! -d "$SCRIPT_DIR/node_modules" ]]; then
+  echo "[shook] 未检测到 node_modules，正在安装依赖…" >&2
+  (cd "$SCRIPT_DIR" && npm install >/dev/null)
+fi
+
+NEEDS_BUILD=0
+if [[ ! -f "$SCRIPT_DIR/dist/runtime/cli.js" ]]; then
+  NEEDS_BUILD=1
+else
+  # 检查是否有任何源码文件比构建产物新
+  NEWER_FILES=$(find "$SCRIPT_DIR/runtime" -name "*.ts" -newer "$SCRIPT_DIR/dist/runtime/cli.js" 2>/dev/null | head -n 1)
+  if [[ -n "$NEWER_FILES" ]]; then
+    NEEDS_BUILD=1
+  fi
+fi
+
+if [[ "$NEEDS_BUILD" -eq 1 ]]; then
+  echo "[shook] 检测到代码更新或无构建产物，正在重新构建 TS runtime…" >&2
+  (cd "$SCRIPT_DIR" && npm run build >/dev/null)
+fi
+
+exec node "$SCRIPT_DIR/dist/runtime/cli.js" "$@"

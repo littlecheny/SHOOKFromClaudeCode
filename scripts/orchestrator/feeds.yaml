@@ -1,0 +1,26 @@
+# RSS/Atom 信息源配置
+# 每个分类下可以配置多个 feed 源
+
+ai:
+  - name: "阮一峰的网络日志"
+    url: "http://www.ruanyifeng.com/blog/atom.xml"
+  - name: "AINews"
+    url: "https://www.artificialintelligence-news.com/feed/rss"
+  - name: "OpenAI"
+    url: "https://openai.com/blog/rss.xml"
+  - name: "MIT ReviewAI"
+    url: "https://www.technologyreview.com/topic/artificial-intelligence/feed"
+  - name: "量子位"
+    url: "https://www.qbitai.com/feed"
+  - name: "Google AI Blog"
+    url: "https://ai.googleblog.com/feeds/posts/default"
+  - name: "Y Combinator AI Threads"
+    url: "https://news.ycombinator.com/submitted?id=whoishiring&format=rss"
+
+github:
+  - name: "官方博客"
+    url: "https://github.blog/feed"
+  - name: "Trending Repos RSS"
+    url: "https://github.com/trending.rss"
+
+

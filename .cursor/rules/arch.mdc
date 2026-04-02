@@ -1,0 +1,157 @@
+---
+alwaysApply: true
+---
+# Overview
+
+这是一个名叫 shook 的个人助理项目，采用 LangGraph 架构实现多 Agent 编排。
+
+**运行环境**：项目在 conda 的 `Shook` 虚拟环境中运行，所有依赖均安装在该虚拟环境中。
+
+## 核心架构
+
+项目分为两套系统：
+1. **LangGraph 编排层** (`langgraph/`) - Agent/工具/记忆/监控的核心框架
+2. **传统脚本层** (`scripts/`) - 独立命令行工具（逐步迁移到 LangGraph）
+
+## 目录结构
+
+### LangGraph 编排层（核心）
+
+- `langgraph/` - Agent 编排框架
+  - `tools/` - 工具层（直接实现，无 MCP 中间层）
+    - `base.py` - 工具基类（BaseTool, ToolResult, ToolCategory）
+    - `registry.py` - 工具注册中心
+    - `github.py` - Git 提交推送工具
+    - `news.py` - RSS/Atom 新闻拉取工具
+    - `store.py` - Notion 存储工具
+    - `dxy.py` - 美元指数 DXY 数据获取工具
+    - `nasdaq.py` - 纳斯达克指数数据获取工具
+    - `stablecoin.py` - 稳定币数据获取工具
+    - `fear_greed.py` - 贪婪恐慌指数数据获取工具
+    - `okx_funding.py` - OKX 资金费率数据获取工具
+    - `farside_btc.py` - Farside BTC 资金流向截图工具
+    - `xhs*.py` - 小红书自动化工具（发帖、点赞、评论、抓取）
+    - `douyin*.py` - 抖音自动化工具（点赞、切换视频）
+    - `reminders.py` - macOS 提醒事项工具
+  - `models/` - 模型层（LLM 适配）
+    - `base.py` - 模型基类（BaseModel, Message, ModelResponse）
+    - `adapter.py` - 复用 llm_clients 的适配器
+  - `graphs/` - 编排层（图/流程）
+    - `base.py` - 图基类（BaseGraph, GraphState, NodeResult）
+    - `simple_agent.py` - 简单 Agent 图、Router 图骨架
+  - `memory/` - 记忆层
+    - `base.py` - 记忆接口（BaseMemory, ConversationMemory, VectorMemory）
+    - `in_memory.py` - 内存实现
+  - `observability/` - 监控层
+    - `base.py` - 监控接口（BaseObserver, Event, Metrics）
+    - `logger.py` - 日志实现
+  - `run.py` - CLI 入口（`python -m langgraph`）
+
+### 传统脚本层
+
+- `scripts/` - 脚本入口目录
+ - `shook.py` - 主调度器（交互式命令行）
+ - `cockpit.py` - Prompt 优化工作台
+ - `runway.py` - Runway 项目管理
+ - `orchestrator/` - 每日新闻编排器
+ - `main.py` - 主入口（直接使用 LangGraph 工具）
+ - `feeds.yaml` - RSS/Atom feeds 配置
+ - `prompts/` - 提示词模板
+ - `btc_predictor/` - BTC 预测看板编排器
+ - `main.py` - 主入口（生成 DXY/NASDAQ/稳定币/贪婪恐慌指数/OKX 资金费率看板）
+ - `dxy/` - DXY 示例脚本
+ - `demo.py` - 完整演示
+ - `generate_report.py` - 简报生成器
+
+### 基础设施层
+
+- `llm_clients/` - LLM 抽象层（被 langgraph/models 复用）
+  - `base.py` - 抽象基类
+  - `gemini.py` - Gemini 实现
+  - `factory.py` - 工厂函数
+  - `config/llm.yaml` - LLM 配置
+
+## 开发规范
+
+### LangGraph 开发规范
+
+- **新增工具**：在 `langgraph/tools/` 下创建文件，继承 `BaseTool`，在 `registry.py` 注册
+- **新增流程**：在 `langgraph/graphs/` 下创建文件，继承 `BaseGraph`，实现 `compile()` 方法
+- **工具分类**：使用 `ToolCategory`（readonly/side_effect/expensive）标记工具类型
+- **每个模块都有 base.py**：定义接口/契约，具体实现在其他文件
+
+### 传统脚本开发规范
+
+- 新增命令逻辑应单独放在对应的新文件中，避免直接塞进调度脚本
+- 在 `scripts/shook.py` 中引用并调用新命令文件，以保持入口清晰可维护
+
+### 网页脚本开发规范
+
+- 所有的网页脚本必须使用 playwright 查看网页结构后一次性写成功，写完不要写测试脚本成功率的测试文件，直接继续跑一遍，由我告诉你结果
+- 项目运行环境位于 conda 的名为 Shook 的虚拟环境中
+
+### 通用规范
+
+- 需要调用 LLM 时，使用 `llm_clients` 抽象层，不要直接调用 Gemini/OpenAI SDK
+- LLM 配置优先从环境变量读取，可通过 `llm_clients/config/llm.yaml` 覆盖
+
+## 运行方式
+
+```bash
+# 激活虚拟环境（如果需要）
+conda activate Shook
+
+# LangGraph CLI
+python -m langgraph list-tools                     # 列出所有工具
+python -m langgraph chat                           # 交互式聊天
+python -m langgraph test-tool <name> [params]      # 测试工具
+
+# 传统脚本
+python scripts/shook.py                            # 主调度器
+python scripts/orchestrator/main.py --dry-run      # 每日新闻测试
+python scripts/dxy/demo.py                         # DXY 演示
+```
+
+## 现有功能
+
+### LangGraph 工具（35 个）
+
+**新闻与存储**：
+- `fetch_feed` / `fetch_feeds` - RSS/Atom 新闻拉取
+- `get_seen` / `mark_seen` / `mark_report_use` - Notion 去重存储
+
+**Git 操作**：
+- `commit_and_push` - Git 提交推送
+
+**金融数据**：
+- `get_dxy` / `get_dxy_info` - 美元指数 DXY 数据获取
+- `get_nasdaq` / `get_nasdaq_info` - 纳斯达克指数数据获取
+- `get_stablecoin` / `get_stablecoin_info` - 稳定币数据获取
+- `get_fear_greed` / `get_fear_greed_info` - 贪婪恐慌指数数据获取
+- `get_okx_funding_rate` / `get_okx_funding_rate_info` - OKX 资金费率数据获取
+- `farside_btc_screenshot` - Farside BTC 资金流向截图
+
+**小红书自动化**：
+- `xhs_post_text` - 发布笔记
+- `xhs_like_post` - 点赞笔记
+- `xhs_pick_random_post` - 随机选择笔记
+- `xhs_like_random` - 随机点赞（组合器）
+- `xhs_get_post_detail` - 获取笔记详情
+- `xhs_comment_post` - 评论笔记
+- `xhs_write_post` - LLM 生成笔记内容
+
+**抖音自动化**：
+- `douyin_like_video` - 点赞视频
+- `douyin_pick_random_video` - 随机选择视频
+- `douyin_like_random` - 随机点赞（组合器）
+
+**系统工具**（macOS）：
+- `create_reminder` - 创建提醒事项
+- `list_reminder_lists` - 列出提醒列表
+
+### 传统命令
+
+- `getNews` - 生成每日新闻简报（调用 orchestrator/main.py）
+- `predict_btc` - 生成 BTC 预测看板（调用 btc_predictor/main.py）
+- `cockpit` - Prompt 优化工作台
+- `Runway` - 项目管理（add/delete/list）
