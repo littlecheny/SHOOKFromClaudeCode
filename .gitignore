@@ -56,3 +56,6 @@ temp/
 # Node
 node_modules/
 npm-debug.log*
+
+# Local caches
+npm-cache/
