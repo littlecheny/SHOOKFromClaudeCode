@@ -1,0 +1,21 @@
+{
+  "transcript": [
+    "shook> /focus set review fixed workflows",
+    "[focus] review fixed workflows"
+  ],
+  "notes": [
+    "Example session only. Real sessions stay under .shook/sessions/ and are ignored by Git."
+  ],
+  "todos": [
+    {
+      "id": 1779897600000,
+      "content": "Review fixed workflow state",
+      "done": false,
+      "createdAt": "2026-05-30T00:00:00.000Z"
+    }
+  ],
+  "mission": "review fixed workflows",
+  "mode": "standard",
+  "canvasExpanded": true,
+  "savedAt": "2026-05-30T00:00:00.000Z"
+}

@@ -9,17 +9,32 @@ type PendingRequest = {
   onStream?: (event: WorkerStreamEvent) => void
 }
 
+type DiagnosticHandler = (line: string) => void
+
 export class PythonWorkerClient {
   private child?: ChildProcessWithoutNullStreams
   private stdoutReader?: readline.Interface
   private stderrReader?: readline.Interface
   private readonly pending = new Map<string, PendingRequest>()
+  private diagnosticHandler?: DiagnosticHandler
   private nextId = 0
 
   constructor(
     private readonly projectRoot: string,
     private readonly pythonExecutable = process.env.SHOOK_PYTHON ?? 'python3',
   ) {}
+
+  setDiagnosticHandler(handler: DiagnosticHandler | undefined): void {
+    this.diagnosticHandler = handler
+  }
+
+  private emitDiagnostic(line: string): void {
+    if (this.diagnosticHandler) {
+      this.diagnosticHandler(line)
+      return
+    }
+    process.stderr.write(`${line}\n`)
+  }
 
   private ensureStarted(): void {
     if (this.child) {
@@ -50,7 +65,7 @@ export class PythonWorkerClient {
       this.handleWorkerMessage(line)
     })
     this.stderrReader.on('line', line => {
-      process.stderr.write(`[worker] ${line}\n`)
+      this.emitDiagnostic(`[worker] ${line}`)
     })
     this.child.on('exit', (code, signal) => {
       this.handleUnexpectedExit(code, signal)
@@ -67,7 +82,7 @@ export class PythonWorkerClient {
     try {
       message = JSON.parse(rawLine) as WorkerMessage
     } catch {
-      process.stderr.write(`[worker] 无法解析消息: ${rawLine}\n`)
+      this.emitDiagnostic(`[worker] 无法解析消息: ${rawLine}`)
       return
     }
 
@@ -77,8 +92,7 @@ export class PythonWorkerClient {
     }
 
     if (message.type === 'log') {
-      const writer = message.level === 'error' ? process.stderr : process.stdout
-      writer.write(`${message.message}\n`)
+      this.emitDiagnostic(`[worker:${message.level}] ${message.message}`)
       return
     }
 

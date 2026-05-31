@@ -1,29 +1,31 @@
+import 'dotenv/config'
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
-import readline from 'node:readline/promises'
 import { fileURLToPath } from 'node:url'
-import { buildContextCanvas } from './contextCanvas.js'
 import { getCockpitHelp, runCockpitTransform, type CockpitMode } from './cockpit.js'
-import { buildInputChrome, cursorUpCount } from './inputChrome.js'
 import { readInputWithInk } from './inkInput.js'
 import { render as renderMessages } from './messages.js'
 import { ModelClient } from './modelClient.js'
 import type { CommandRunResult, HandshakeResult, ToolDescriptor, WorkerStreamEvent } from './protocol.js'
 import { runQueryLoop } from './queryLoop.js'
-import { runGetNews } from './newsWorkflow.js'
-import { runPredictBtc } from './predictBtc.js'
 import {
   ensureStateDirs,
   listSavedSessions,
   loadLatestSnapshot,
   loadNamedSession,
+  loadTodosFile,
+  loadWorkflowState,
+  recordWorkflowRun,
   saveLatestSnapshot,
   saveNamedSession,
+  saveTodosFile,
   type SessionSnapshot,
   type TodoItem,
+  type WorkflowStateFile,
 } from './statePersistence.js'
 import { PythonWorkerClient } from './workerClient.js'
+import { getWorkflow, listWorkflows } from './workflows/registry.js'
 
 type CliOptions = {
   execCommands: string[]
@@ -48,10 +50,12 @@ type RuntimeState = {
   currentSession: string | null
   cockpitMode: CockpitMode | null
   busy: boolean
+  canvasExpanded: boolean
+  workflowState: WorkflowStateFile
 }
 
 const RUNTIME_VERSION = '0.1.0'
-const BUILTIN_COMMANDS = new Set(['getNews', 'Runway'])
+const COCKPIT_COMMANDS = new Set(['cockpit'])
 const RED = '\u001B[31m'
 const LIGHT_RED = '\u001B[38;5;203m'
 const RESET = '\u001B[0m'
@@ -263,19 +267,31 @@ async function loadDashboardConfig(projectRoot: string): Promise<DashboardConfig
   }
 }
 
-function buildDashboard(monsterLines: string[], handshake: HandshakeResult, busy: boolean, config: DashboardConfig): string {
+function formatWorkflowStatus(workflowState: WorkflowStateFile, workflowName: string): string {
+  const state = workflowState[workflowName]
+  if (!state) {
+    return `${workflowName}: never`
+  }
+  const marker = state.last_status === 'success' ? 'ok' : 'fail'
+  const time = state.last_run_at.slice(5, 16).replace('T', ' ')
+  return `${workflowName}: ${marker} ${time}`
+}
+
+function buildDashboard(state: RuntimeState, monsterLines: string[], config: DashboardConfig): string {
   const leftDashCount = Math.max(config.leftWidth - config.title.length - 1, 0)
   const rightDashCount = Math.max(config.rightWidth - 1, 0)
   const lines: string[] = []
-  const runway = formatRunwayProjects(handshake.runwayProjects)
+  const runway = formatRunwayProjects(state.handshake.runwayProjects)
+  const openTodos = state.todos.filter(todo => !todo.done).length
+  const focus = state.focus ? state.focus.slice(0, 26) : 'None'
   const rightContent = [
-    '',
-    '',
-    `${RED}    P l i o t s :${RESET}  ${busy ? '1 / 0' : '0 / 1'}`,
-    '',
+    `${RED}    S t a t u s :${RESET}  ${state.busy ? 'running' : 'idle'}`,
+    `${RED}    F o c u s :${RESET}  ${focus}`,
+    `${RED}    T o d o s :${RESET}  ${openTodos} open / ${state.todos.length} total`,
     `${RED}    R u n w a y :${RESET}  ${runway}`,
-    '',
-    '',
+    `${RED}    N e w s :${RESET}  ${formatWorkflowStatus(state.workflowState, 'get-news')}`,
+    `${RED}    B T C :${RESET}  ${formatWorkflowStatus(state.workflowState, 'predict-btc')}`,
+    `${RED}    M o d e :${RESET}  ${state.cockpitMode ?? 'standard'}`,
   ]
 
   lines.push(`${RED}┌─${config.title}${'─'.repeat(leftDashCount)}┬${'─'.repeat(rightDashCount)}┐${RESET}`)
@@ -328,12 +344,18 @@ function buildSnapshot(state: RuntimeState): SessionSnapshot {
     todos: state.todos,
     mission: state.focus,
     mode: state.cockpitMode ? `cockpit:${state.cockpitMode}` : 'standard',
+    canvasExpanded: state.canvasExpanded,
     savedAt: new Date().toISOString(),
   }
 }
 
 async function persistLatestState(state: RuntimeState): Promise<void> {
   await saveLatestSnapshot(state.projectRoot, buildSnapshot(state))
+  // 同步写一份到 todos.json，让用户可以直接手动编辑
+  await saveTodosFile(state.projectRoot, {
+    focus: state.focus,
+    todos: state.todos,
+  })
 }
 
 function loadSnapshotIntoState(state: RuntimeState, snapshot: SessionSnapshot, sessionName: string | null): void {
@@ -343,6 +365,7 @@ function loadSnapshotIntoState(state: RuntimeState, snapshot: SessionSnapshot, s
   state.focus = snapshot.mission ?? null
   state.currentSession = sessionName
   state.cockpitMode = snapshot.mode?.startsWith('cockpit:') ? snapshot.mode.slice('cockpit:'.length) as CockpitMode : null
+  state.canvasExpanded = snapshot.canvasExpanded ?? false
 }
 
 async function renderIntroAnimation(projectRoot: string): Promise<void> {
@@ -363,19 +386,36 @@ async function renderIntroAnimation(projectRoot: string): Promise<void> {
 function renderUi(state: RuntimeState, monsterLines: string[], dashboardConfig: DashboardConfig): void {
   process.stdout.write('\u001B[2J\u001B[3J\u001B[H')
   const width = Math.max(40, Math.min(120, process.stdout.columns ?? 88))
-  process.stdout.write(buildDashboard(monsterLines, state.handshake, state.busy, dashboardConfig))
+  process.stdout.write(buildDashboard(state, monsterLines, dashboardConfig))
   process.stdout.write(`${dashboardConfig.tagline}\n\n`)
   if (state.transcript.length > 0) {
-    process.stdout.write(`${renderMessages(state.transcript, width)}\n\n`)
+    const spacing = Number.parseInt(process.env.SHOOK_MESSAGE_SPACING ?? '1', 10)
+    process.stdout.write(`${renderMessages(state.transcript, width, { messageSpacing: Number.isFinite(spacing) ? spacing : 1 })}\n\n`)
+  }
+}
+
+function appendAndMaybeRender(
+  state: RuntimeState,
+  content: string,
+  dashboardConfig?: DashboardConfig,
+  monsterLines: string[] = [],
+): void {
+  appendTranscript(state, content)
+  if (dashboardConfig) {
+    renderUi(state, monsterLines, dashboardConfig)
   }
 }
 
 function printHelp(handshake?: HandshakeResult): void {
+  const workflowLines = listWorkflows().map(workflow => `  /${workflow.name.padEnd(12)} ${workflow.description}`)
   const lines = [
     'Shook TS Runtime',
     '',
+    '固定工作流：',
+    ...workflowLines,
+    '',
     'slash 命令：',
-    '  /get-news [--dry-run] [--date YYYY-MM-DD]   生成日报',
+    '  /get-news [--date YYYY-MM-DD]               生成新闻日报',
     '  /predict-btc [--output-dir PATH]            生成 BTC 预测看板',
     '  /cockpit draft|compress|polish [TEXT]       进入/执行草拟-压缩-润色模式',
     '  /cockpit off                                退出 Cockpit 模式',
@@ -387,8 +427,10 @@ function printHelp(handshake?: HandshakeResult): void {
     '  /todo add TEXT | /todo done N              管理待办事项',
     '  /todo list | /todo undo N | /todo rm N     查看/恢复/删除待办',
     '  /save [NAME] | /load NAME                  保存或加载会话快照',
-    '  /sessions                                  列出已保存会话',
+    '  /sessions | /new                           列出已保存会话 / 开启全新会话',
     '  /tools [refresh]                           查看或刷新当前可用工具',
+    '  /canvas refresh | /refresh                 刷新画布区域',
+    '  /detail | /toggle                          切换画布展开/折叠模式',
     '  /help                                       显示帮助',
     '  /exit                                       退出运行时',
     '',
@@ -408,9 +450,12 @@ function writeCommandStream(event: WorkerStreamEvent): void {
   writer.write(`${event.line}\n`)
 }
 
-function createTranscriptStreamWriter(state: RuntimeState): (event: WorkerStreamEvent) => void {
+function createTranscriptStreamWriter(
+  state: RuntimeState,
+  dashboardConfig?: DashboardConfig,
+): (event: WorkerStreamEvent) => void {
   return (event: WorkerStreamEvent) => {
-    appendTranscript(state, event.line)
+    appendAndMaybeRender(state, event.line, dashboardConfig)
   }
 }
 
@@ -516,6 +561,22 @@ async function handleCanvasCommands(command: string, args: string[], state: Runt
     return true
   }
 
+  if (command === 'new') {
+    state.transcript = []
+    state.notes = []
+    state.todos = []
+    state.focus = null
+    state.cockpitMode = null
+    state.currentSession = null
+
+    // 如果想要清空控制台，可以直接写入 ANSI 转义序列
+    process.stdout.write('\u001B[2J\u001B[3J\u001B[H')
+
+    appendTranscript(state, '[session] 已开启全新会话')
+    await persistLatestState(state)
+    return true
+  }
+
   if (command === 'sessions') {
     const sessions = await listSavedSessions(state.projectRoot)
     appendTranscript(state, sessions.length > 0 ? sessions.join('\n') : '[session] 暂无已保存会话')
@@ -532,7 +593,7 @@ async function handleCanvasCommands(command: string, args: string[], state: Runt
     appendTranscript(
       state,
       state.tools.length > 0
-        ? `[tools] 当前共 ${state.tools.length} 个工具\n${state.tools.map(tool => `- ${tool.name}`).join('\n')}`
+        ? `[tools] 当前共 ${state.tools.length} 个工具\n${state.tools.map(tool => `- ${tool.name} [${tool.category ?? 'unknown'}]`).join('\n')}`
         : '[tools] 当前没有已加载工具，可尝试 /tools refresh',
     )
     return true
@@ -553,6 +614,29 @@ async function handleCanvasCommands(command: string, args: string[], state: Runt
     appendTranscript(state, `[session] 已加载：${sessionName}`)
     await persistLatestState(state)
     return true
+  }
+
+  if (command === 'detail' || command === 'toggle') {
+    state.canvasExpanded = !state.canvasExpanded
+    appendTranscript(state, state.canvasExpanded ? '[canvas] 已切换到展开模式' : '[canvas] 已切换到折叠模式')
+    await persistLatestState(state)
+    return true
+  }
+
+  if (command === 'canvas' || command === 'refresh') {
+    if (args[0] === 'refresh' || command === 'refresh') {
+      // 从 todos.json 重新拉一次 focus / todos，支持用户手动编辑后热刷新
+      const todosFile = await loadTodosFile(state.projectRoot)
+      if (todosFile) {
+        state.todos = todosFile.todos
+        state.focus = todosFile.focus
+        appendTranscript(state, '[canvas] 已从 todos.json 重新加载 Focus/Todos')
+      } else {
+        appendTranscript(state, '[canvas] 已刷新')
+      }
+      await persistLatestState(state)
+      return true
+    }
   }
 
   return false
@@ -596,6 +680,85 @@ async function handleCockpitCommands(
   return true
 }
 
+async function runRegisteredWorkflow(
+  workflowCommand: string,
+  args: string[],
+  client: PythonWorkerClient,
+  state: RuntimeState,
+  modelClient: ModelClient,
+  streamWriter: (event: WorkerStreamEvent) => void,
+  isInteractive: boolean,
+  dashboardConfig?: DashboardConfig,
+): Promise<CommandOutcome | null> {
+  const workflow = getWorkflow(workflowCommand)
+  if (!workflow) {
+    return null
+  }
+
+  const startedAt = Date.now()
+  state.busy = true
+  try {
+    const emitLog = (line: string) => {
+      if (isInteractive) {
+        appendAndMaybeRender(state, line, dashboardConfig)
+      } else {
+        console.log(line)
+      }
+    }
+    const result = await workflow.run(args, {
+      projectRoot: state.projectRoot,
+      workerClient: client,
+      modelClient,
+      onLog: emitLog,
+      onStream: streamWriter,
+      runWorkerBuiltin: (command: string, builtinArgs: string[]) => client.request<CommandRunResult, { command: string; args: string[] }>(
+        'run_builtin',
+        { command, args: builtinArgs },
+        streamWriter,
+      ),
+    })
+
+    if (result.runwayProjects) {
+      state.handshake = {
+        ...state.handshake,
+        runwayProjects: result.runwayProjects,
+      }
+    }
+
+    if (result.message) {
+      if (isInteractive) appendAndMaybeRender(state, result.message, dashboardConfig)
+      else console.log(result.message)
+    }
+
+    state.workflowState = await recordWorkflowRun(state.projectRoot, workflow.name, {
+      last_run_at: new Date().toISOString(),
+      last_status: result.exitCode === 0 ? 'success' : 'failed',
+      last_output: result.outputPath,
+      last_error: result.exitCode === 0 ? undefined : result.message,
+      duration_ms: Date.now() - startedAt,
+    })
+    await persistLatestState(state)
+    return { continueRunning: true, exitCode: result.exitCode }
+  } catch (error) {
+    const message = `[${workflow.name}] ${(error as Error).message}`
+    if (isInteractive) appendAndMaybeRender(state, message, dashboardConfig)
+    else console.error(message)
+    state.workflowState = await recordWorkflowRun(state.projectRoot, workflow.name, {
+      last_run_at: new Date().toISOString(),
+      last_status: 'failed',
+      last_error: (error as Error).message,
+      duration_ms: Date.now() - startedAt,
+    })
+    await persistLatestState(state)
+    return { continueRunning: true, exitCode: 1 }
+  } finally {
+    state.busy = false
+    if (isInteractive && dashboardConfig) {
+      renderUi(state, [], dashboardConfig)
+    }
+  }
+}
+
 async function runCommand(
   line: string,
   client: PythonWorkerClient,
@@ -612,7 +775,7 @@ async function runCommand(
   }
 
   const isInteractive = options?.interactive ?? false
-  const streamWriter = isInteractive ? createTranscriptStreamWriter(state) : writeCommandStream
+  const streamWriter = isInteractive ? createTranscriptStreamWriter(state, options?.dashboardConfig) : writeCommandStream
   if (isInteractive) {
     appendTranscript(state, `shook> ${trimmed}`)
   }
@@ -622,12 +785,13 @@ async function runCommand(
     if (!shellCommand) {
       const message = '[shook] ! 后面需要跟要执行的 shell 命令'
       if (isInteractive) {
-        appendTranscript(state, message)
+        appendAndMaybeRender(state, message, options?.dashboardConfig)
       } else {
         console.error(message)
       }
       return { continueRunning: true, exitCode: 1 }
     }
+    state.busy = true
     try {
       const result = await client.request<CommandRunResult, { commandLine: string }>(
         'run_shell',
@@ -637,7 +801,7 @@ async function runCommand(
       if (result.exitCode !== 0) {
         const message = `[shook] 命令退出码: ${result.exitCode}`
         if (isInteractive) {
-          appendTranscript(state, message)
+          appendAndMaybeRender(state, message, options?.dashboardConfig)
         } else {
           console.error(message)
         }
@@ -646,11 +810,16 @@ async function runCommand(
     } catch (error) {
       const message = `[shook] ${(error as Error).message}`
       if (isInteractive) {
-        appendTranscript(state, message)
+        appendAndMaybeRender(state, message, options?.dashboardConfig)
       } else {
         console.error(message)
       }
       return { continueRunning: true, exitCode: 1 }
+    } finally {
+      state.busy = false
+      if (isInteractive && options?.dashboardConfig) {
+        renderUi(state, [], options.dashboardConfig)
+      }
     }
   }
 
@@ -661,7 +830,7 @@ async function runCommand(
   } catch (error) {
     const message = `[shook] ${(error as Error).message}`
     if (isInteractive) {
-      appendTranscript(state, message)
+      appendAndMaybeRender(state, message, options?.dashboardConfig)
     } else {
       console.error(message)
     }
@@ -680,8 +849,11 @@ async function runCommand(
       appendTranscript(state, [
         'Shook TS Runtime',
         '',
+        '固定工作流：',
+        ...listWorkflows().map(workflow => `  /${workflow.name.padEnd(12)} ${workflow.description}`),
+        '',
         'slash 命令：',
-        '  /get-news [--dry-run] [--date YYYY-MM-DD]   生成日报',
+        '  /get-news [--date YYYY-MM-DD]               生成日报',
         '  /predict-btc [--output-dir PATH]            生成 BTC 预测看板',
         '  /cockpit draft|compress|polish [TEXT]       进入/执行草拟-压缩-润色模式',
         '  /cockpit off                                退出 Cockpit 模式',
@@ -693,8 +865,10 @@ async function runCommand(
         '  /todo add TEXT | /todo done N              管理待办事项',
         '  /todo list | /todo undo N | /todo rm N     查看/恢复/删除待办',
         '  /save [NAME] | /load NAME                  保存或加载会话快照',
-        '  /sessions                                  列出已保存会话',
+        '  /sessions | /new                           列出已保存会话 / 开启全新会话',
         '  /tools [refresh]                           查看或刷新当前可用工具',
+        '  /canvas refresh | /refresh                 刷新画布区域',
+        '  /detail | /toggle                          切换画布展开/折叠模式',
         '  /help                                       显示帮助',
         '  /exit                                       退出运行时',
         '',
@@ -712,176 +886,88 @@ async function runCommand(
     return { continueRunning: false, exitCode: 0 }
   }
 
-  if (trimmed.startsWith('/') && normalizedCommand === 'cockpit') {
-    await handleCockpitCommands(args, state, modelClient)
-    return { continueRunning: true, exitCode: 0 }
-  }
-
-  if (trimmed.startsWith('/') && normalizedCommand === 'predict_btc') {
-    try {
-      state.busy = true
-      const outputDirArgIndex = args.findIndex(arg => arg === '--output-dir')
-      const outputDir = outputDirArgIndex >= 0 ? (args[outputDirArgIndex + 1] ?? '') : ''
-      const reportPath = await runPredictBtc({
-        projectRoot: state.projectRoot,
-        outputDir,
-        workerClient: client,
-        modelClient,
-        onLog: (line: string) => isInteractive ? appendTranscript(state, line) : console.log(line),
-      })
-      const message = `[predict-btc] 报告已生成：${reportPath}`
-      if (isInteractive) appendTranscript(state, message)
-      else console.log(message)
-      await persistLatestState(state)
+  if (trimmed.startsWith('/')) {
+    if (COCKPIT_COMMANDS.has(normalizedCommand)) {
+      await handleCockpitCommands(args, state, modelClient)
       return { continueRunning: true, exitCode: 0 }
-    } catch (error) {
-      const message = `[shook] ${(error as Error).message}`
-      if (isInteractive) appendTranscript(state, message)
-      else console.error(message)
-      return { continueRunning: true, exitCode: 1 }
-    } finally {
-      state.busy = false
     }
-  }
 
-  if (trimmed.startsWith('/') && await handleCanvasCommands(normalizedCommand, args, state, client)) {
-    return { continueRunning: true, exitCode: 0 }
-  }
+    const workflowOutcome = await runRegisteredWorkflow(normalizedCommand, args, client, state, modelClient, streamWriter, isInteractive, options?.dashboardConfig)
+    if (workflowOutcome) {
+      return workflowOutcome
+    }
 
-  if (!trimmed.startsWith('/') && !BUILTIN_COMMANDS.has(normalizedCommand)) {
-    try {
-      state.busy = true
-      if (state.cockpitMode) {
-        const result = await runCockpitTransform({
-          mode: state.cockpitMode,
-          text: trimmed,
-          modelClient,
-        })
-        const label = state.cockpitMode === 'draft' ? '草拟' : state.cockpitMode === 'compress' ? '压缩' : '润色'
-        if (isInteractive) appendTranscript(state, `Cockpit(${label}): ${result}`)
-        else console.log(`Cockpit(${label}): ${result}`)
-        await persistLatestState(state)
-        return { continueRunning: true, exitCode: 0 }
-      }
-      const generator = runQueryLoop({
-        prompt: trimmed,
-        tools: state.tools,
-        modelClient,
-        workerClient: client,
-        history: state.transcript,
-        notes: state.notes,
-        todos: state.todos,
-      })
-
-      for await (const event of generator) {
-        if (event.type === 'text') {
-          if (isInteractive) appendTranscript(state, event.content)
-          else console.log(event.content)
-        } else if (event.type === 'tool_start') {
-          const msg = `[tool] ${event.tool}\n${JSON.stringify(event.args, null, 2)}`
-          if (isInteractive) appendTranscript(state, msg)
-          else console.log(msg)
-        } else if (event.type === 'tool_result') {
-          const msg = `[tool-result] ${event.tool}\n${event.result}`
-          if (isInteractive) appendTranscript(state, msg)
-          else console.log(msg)
-        } else if (event.type === 'error') {
-          if (isInteractive) appendTranscript(state, event.message)
-          else console.error(event.message)
-        }
-
-        // 每次收到新事件，刷新一次 UI，实现真正的流式响应体验！
-        if (isInteractive && options?.dashboardConfig) {
-          renderUi(state, [], options.dashboardConfig)
-        }
-      }
-
-      await persistLatestState(state)
+    if (await handleCanvasCommands(normalizedCommand, args, state, client)) {
       return { continueRunning: true, exitCode: 0 }
-    } catch (error) {
-      const message = `[shook] ${(error as Error).message}`
-      if (isInteractive) {
-        appendTranscript(state, message)
-      } else {
-        console.error(message)
-      }
-      return { continueRunning: true, exitCode: 1 }
-    } finally {
-      state.busy = false
     }
+
+    const message = `[shook] 未知命令: /${normalizedCommand}`
+    if (isInteractive) appendAndMaybeRender(state, message, options?.dashboardConfig)
+    else console.error(message)
+    return { continueRunning: true, exitCode: 1 }
+  }
+
+  const workflowOutcome = await runRegisteredWorkflow(normalizedCommand, args, client, state, modelClient, streamWriter, isInteractive, options?.dashboardConfig)
+  if (workflowOutcome) {
+    return workflowOutcome
   }
 
   try {
     state.busy = true
-    if (BUILTIN_COMMANDS.has(normalizedCommand)) {
-      if (normalizedCommand === 'getNews') {
-        // 直接走 TS runtime 的编排，不再调用旧 Python orchestrator
-        const dryRun = args.includes('--dry-run')
-        const dateArgIndex = args.findIndex(a => a === '--date')
-        const date = dateArgIndex >= 0 ? (args[dateArgIndex + 1] ?? '') : ''
-        const reportPath = await runGetNews({
-          projectRoot: state.projectRoot,
-          workerClient: client,
-          modelClient,
-          date,
-          dryRun,
-          onLog: (line: string) => isInteractive ? appendTranscript(state, line) : console.log(line),
-        })
-        if (reportPath) {
-          const message = `[get-news] 报告已生成：${reportPath}`
-          if (isInteractive) appendTranscript(state, message)
-          else console.log(message)
-        }
-        await persistLatestState(state)
-        return { continueRunning: true, exitCode: 0 }
-      }
-      const result = await client.request<CommandRunResult, { command: string; args: string[] }>(
-        'run_builtin',
-        { command: normalizedCommand, args },
-        streamWriter,
-      )
-
-      if (result.runwayProjects) {
-        state.handshake = {
-          ...state.handshake,
-          runwayProjects: result.runwayProjects,
-        }
-      }
-
-      if (result.exitCode !== 0) {
-        const message = `[shook] 命令退出码: ${result.exitCode}`
-        if (isInteractive) {
-          appendTranscript(state, message)
-        } else {
-          console.error(message)
-        }
-      }
-
+    if (state.cockpitMode) {
+      const result = await runCockpitTransform({
+        mode: state.cockpitMode,
+        text: trimmed,
+        modelClient,
+      })
+      const label = state.cockpitMode === 'draft' ? '草拟' : state.cockpitMode === 'compress' ? '压缩' : '润色'
+      if (isInteractive) appendTranscript(state, `Cockpit(${label}): ${result}`)
+      else console.log(`Cockpit(${label}): ${result}`)
       await persistLatestState(state)
-      return { continueRunning: true, exitCode: result.exitCode }
+      return { continueRunning: true, exitCode: 0 }
     }
+    const generator = runQueryLoop({
+      prompt: trimmed,
+      tools: state.tools,
+      modelClient,
+      workerClient: client,
+      history: state.transcript,
+      notes: state.notes,
+      todos: state.todos,
+    })
 
-    const result = await client.request<CommandRunResult, { commandLine: string }>(
-      'run_shell',
-      { commandLine: trimmed },
-      streamWriter,
-    )
+    for await (const event of generator) {
+      if (event.type === 'text') {
+        if (isInteractive) appendTranscript(state, event.content)
+        else console.log(event.content)
+      } else if (event.type === 'tool_start') {
+        const msg = `[tool] ${event.tool}\n${JSON.stringify(event.args, null, 2)}`
+        if (isInteractive) appendTranscript(state, msg)
+        else console.log(msg)
+      } else if (event.type === 'tool_result') {
+        const msg = `[tool-result] ${event.tool}\n${event.result}`
+        if (isInteractive) appendTranscript(state, msg)
+        else console.log(msg)
+      } else if (event.type === 'tool_policy') {
+        const msg = `[tool-policy] ${event.tool}: ${event.message}`
+        if (isInteractive) appendTranscript(state, msg)
+        else console.log(msg)
+      } else if (event.type === 'error') {
+        if (isInteractive) appendTranscript(state, event.message)
+        else console.error(event.message)
+      }
 
-    if (result.exitCode !== 0) {
-      const message = `[shook] 命令退出码: ${result.exitCode}`
-      if (isInteractive) {
-        appendTranscript(state, message)
-      } else {
-        console.error(message)
+      if (isInteractive && options?.dashboardConfig) {
+        renderUi(state, [], options.dashboardConfig)
       }
     }
 
     await persistLatestState(state)
-    return { continueRunning: true, exitCode: result.exitCode }
+    return { continueRunning: true, exitCode: 0 }
   } catch (error) {
     const message = `[shook] ${(error as Error).message}`
     if (isInteractive) {
-      appendTranscript(state, message)
+      appendAndMaybeRender(state, message, options?.dashboardConfig)
     } else {
       console.error(message)
     }
@@ -938,7 +1024,7 @@ async function runInteractiveSession(
       renderUi(state, monsterLines, dashboardConfig)
       const line = await readInputWithInk(state)
       process.stdout.write(RESET)
-      const outcome = await runCommand(line, client, state, modelClient, { 
+      const outcome = await runCommand(line, client, state, modelClient, {
         interactive: true,
         dashboardConfig
       })
@@ -970,6 +1056,7 @@ async function main(): Promise<number> {
   try {
     await ensureStateDirs(projectRoot)
     const handshake = await client.request<HandshakeResult, Record<string, never>>('handshake', {})
+    const workflowState = await loadWorkflowState(projectRoot)
     const state: RuntimeState = {
       handshake,
       projectRoot,
@@ -981,17 +1068,36 @@ async function main(): Promise<number> {
       currentSession: null,
       cockpitMode: null,
       busy: false,
+      canvasExpanded: false,
+      workflowState,
     }
     const latestSnapshot = await loadLatestSnapshot(projectRoot)
     if (latestSnapshot) {
       loadSnapshotIntoState(state, latestSnapshot, 'latest')
     }
-    const initialTools = await refreshTools(state, client)
-    if (!initialTools.ok) {
-      appendTranscript(state, initialTools.message)
+    // todos.json 优先级高于 latest.json 中的 todos/focus，允许用户手动编辑后立即生效
+    const todosFile = await loadTodosFile(projectRoot)
+    if (todosFile) {
+      state.todos = todosFile.todos
+      state.focus = todosFile.focus
+    } else {
+      // 首次启动：把当前 state 刷成 todos.json，方便用户编辑
+      await saveTodosFile(projectRoot, { focus: state.focus, todos: state.todos })
     }
     const monsterLines = await loadMonsterLines(projectRoot)
     const dashboardConfig = await loadDashboardConfig(projectRoot)
+    const shouldRenderDiagnostics = process.stdin.isTTY && options.execCommands.length === 0 && !options.showHelp
+    client.setDiagnosticHandler(line => {
+      if (shouldRenderDiagnostics) {
+        appendAndMaybeRender(state, line, dashboardConfig, monsterLines)
+        return
+      }
+      process.stderr.write(`${line}\n`)
+    })
+    const initialTools = await refreshTools(state, client)
+    if (!initialTools.ok) {
+      appendAndMaybeRender(state, initialTools.message, shouldRenderDiagnostics ? dashboardConfig : undefined, monsterLines)
+    }
 
     if (options.showHelp) {
       printHelp(handshake)

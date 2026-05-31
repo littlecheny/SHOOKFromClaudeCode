@@ -59,3 +59,12 @@ npm-debug.log*
 
 # Local caches
 npm-cache/
+
+# Shook runtime state
+.shook/latest.json
+.shook/todos.json
+.shook/workflows.json
+.shook/sessions/
+
+# Generated news reports
+reports/*.md

@@ -23,6 +23,9 @@ export interface ToolDescriptor {
   name: string
   description: string
   input_schema: Record<string, unknown>
+  category?: 'readonly' | 'side_effect' | 'expensive' | string
+  cost_estimate?: number
+  reliability?: number
 }
 
 export interface WorkerRequest<T = unknown> {

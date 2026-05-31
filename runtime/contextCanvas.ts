@@ -10,6 +10,7 @@ const YELLOW = '\x1b[33m'
 const GREEN = '\x1b[32m'
 const MAGENTA = '\x1b[35m'
 const GRAY = '\x1b[90m'
+const RED = '\x1b[31m'
 
 // Box drawing chars
 const V_LINE = '┃'
@@ -24,6 +25,7 @@ type CanvasState = {
   focus: string | null
   currentSession: string | null
   toolsCount: number
+  expanded?: boolean
   width?: number
 }
 
@@ -95,24 +97,79 @@ export function buildContextCanvas(state: CanvasState): string {
   const sessionText = state.currentSession ? `${CYAN}${clip(state.currentSession, 12)}${RESET}` : `${DIM}latest${RESET}`
   const toolsText = `${YELLOW}${state.toolsCount} available${RESET}`
   const signals = collectRecentSignals(state.transcript)
-  const noteText = state.notes.length > 0
-    ? state.notes.slice(-2).map(note => clip(note, maxNote)).join(`${DIM} · ${RESET}`)
-    : `${DIM}暂无工作记忆${RESET}`
-  const todoText = state.todos.length > 0
-    ? state.todos
-        .slice(-3)
-        .map(todo => `${todo.done ? `${GREEN}✓${RESET}` : `${GRAY}○${RESET}`} ${clip(todo.content, maxTodo)}`)
-        .join(`${DIM} · ${RESET}`)
-    : `${DIM}暂无待办事项${RESET}`
-  const signalText = signals.length > 0
-    ? signals.slice(0, 2).map(sig => clip(sig, maxSignal)).join(`${DIM} | ${RESET}`)
-    : `${DIM}暂无近期交互${RESET}`
+  const modeIndicator = state.expanded ? `${GREEN}[展开]${RESET}` : `${DIM}[折叠]${RESET}`
 
-  lines.push(`${prefix} ${BOLD}${CYAN}✨ Canvas${RESET}  ${BOLD}Focus:${RESET} ${focusText}  ${DIM}|${RESET}  ${BOLD}Session:${RESET} ${sessionText}  ${DIM}|${RESET}  ${BOLD}Tools:${RESET} ${toolsText}`)
-  lines.push(`${prefix} ${BOLD}${MAGENTA}🧠 Memory:${RESET} ${noteText}`)
-  lines.push(`${prefix} ${BOLD}${BLUE}✅ Todos:${RESET} ${todoText}`)
-  lines.push(`${prefix} ${BOLD}${YELLOW}📡 Signals:${RESET} ${signalText}`)
+  lines.push(`${prefix} ${BOLD}${CYAN}✨ Canvas${RESET} ${modeIndicator}  ${BOLD}Focus:${RESET} ${focusText}  ${DIM}|${RESET}  ${BOLD}Session:${RESET} ${sessionText}  ${DIM}|${RESET}  ${BOLD}Tools:${RESET} ${toolsText}`)
+
+  if (state.expanded) {
+    // 展开模式：显示全部详情
+    const maxNoteDetail = Math.max(20, width - 30)
+    const maxTodoDetail = Math.max(20, width - 30)
+    const maxSignalDetail = Math.max(20, width - 30)
+
+    // Notes
+    lines.push(`${prefix} ${BOLD}${MAGENTA}🧠 Memory:${RESET}`)
+    if (state.notes.length > 0) {
+      state.notes.forEach((note, index) => {
+        lines.push(`${prefix}   ${index + 1}. ${clip(note, maxNoteDetail)}`)
+      })
+    } else {
+      lines.push(`${prefix}   ${DIM}暂无工作记忆${RESET}`)
+    }
+
+    // Todos - 区分紧急和非紧急（按顺序）
+    lines.push(`${prefix} ${BOLD}${BLUE}✅ Todos:${RESET}`)
+    if (state.todos.length > 0) {
+      const urgentCount = Math.max(1, Math.min(2, Math.ceil(state.todos.length / 3)))
+      state.todos.forEach((todo, index) => {
+        const isUrgent = index < urgentCount && !todo.done
+        const urgentIndicator = isUrgent ? `${RED}🔥${RESET} ` : ''
+        const statusIcon = todo.done ? `${GREEN}✓${RESET}` : `${GRAY}○${RESET}`
+        const content = clip(todo.content, maxTodoDetail)
+        lines.push(`${prefix}   ${statusIcon} ${urgentIndicator}${content}`)
+      })
+    } else {
+      lines.push(`${prefix}   ${DIM}暂无待办事项${RESET}`)
+    }
+
+    // Signals
+    lines.push(`${prefix} ${BOLD}${YELLOW}📡 Signals:${RESET}`)
+    if (signals.length > 0) {
+      signals.forEach((sig, index) => {
+        lines.push(`${prefix}   ${index + 1}. ${clip(sig, maxSignalDetail)}`)
+      })
+    } else {
+      lines.push(`${prefix}   ${DIM}暂无近期交互${RESET}`)
+    }
+  } else {
+    // 折叠模式：只显示简洁版本（紧急 Todo）
+    const noteText = state.notes.length > 0
+      ? state.notes.slice(-2).map(note => clip(note, maxNote)).join(`${DIM} · ${RESET}`)
+      : `${DIM}暂无工作记忆${RESET}`
+
+    // 折叠模式下只显示紧急 Todo（按顺序前 1-2 个未完成的）
+    const urgentCount = Math.max(1, Math.min(2, Math.ceil(state.todos.length / 3)))
+    const urgentTodos = state.todos
+      .filter(todo => !todo.done)
+      .slice(0, urgentCount)
+
+    const todoText = state.todos.length > 0
+      ? urgentTodos.length > 0
+        ? urgentTodos
+            .map(todo => `${RED}🔥${RESET} ${GRAY}○${RESET} ${clip(todo.content, maxTodo)}`)
+            .join(`${DIM} · ${RESET}`)
+        : `${DIM}暂无紧急待办${RESET}`
+      : `${DIM}暂无待办事项${RESET}`
+
+    const signalText = signals.length > 0
+      ? signals.slice(0, 2).map(sig => clip(sig, maxSignal)).join(`${DIM} | ${RESET}`)
+      : `${DIM}暂无近期交互${RESET}`
+
+    lines.push(`${prefix} ${BOLD}${MAGENTA}🧠 Memory:${RESET} ${noteText}`)
+    lines.push(`${prefix} ${BOLD}${BLUE}✅ Todos:${RESET} ${todoText}`)
+    lines.push(`${prefix} ${BOLD}${YELLOW}📡 Signals:${RESET} ${signalText}`)
+  }
+
   lines.push(`${GRAY}${BL_CORNER}${H_LINE.repeat(Math.max(10, width - 2))}${RESET}`)
-
   return lines.join('\n')
 }

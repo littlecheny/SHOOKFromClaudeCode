@@ -5,6 +5,12 @@ const RESET = '\u001B[0m'
 
 export type MsgRole = 'user' | 'assistant' | 'tool' | 'notice' | 'log'
 
+export type RenderOptions = {
+  // Extra blank lines after user/assistant messages to make the transcript breathe.
+  // Keep this small; too large will push history off-screen quickly.
+  messageSpacing?: number
+}
+
 export function classify(line: string): MsgRole {
   if (line.startsWith('shook> ')) return 'user'
   if (line.startsWith('Shook: ')) return 'assistant'
@@ -45,15 +51,23 @@ function renderTool(line: string): string {
   return `${FG_GRAY}${line}${RESET}`
 }
 
-export function render(lines: string[], width: number): string {
-  return lines
-    .map(line => {
-      const role = classify(line)
-      if (role === 'user') return renderUser(line, width)
-      if (role === 'assistant') return renderAssistant(line)
-      if (role === 'notice') return renderNotice(line)
-      if (role === 'tool') return renderTool(line)
-      return line
-    })
-    .join('\n')
+export function render(lines: string[], width: number, options: RenderOptions = {}): string {
+  const spacing = Math.max(0, Math.min(3, Math.floor(options.messageSpacing ?? 1)))
+  const out: string[] = []
+
+  for (const line of lines) {
+    const role = classify(line)
+    if (role === 'user') out.push(renderUser(line, width))
+    else if (role === 'assistant') out.push(renderAssistant(line))
+    else if (role === 'notice') out.push(renderNotice(line))
+    else if (role === 'tool') out.push(renderTool(line))
+    else out.push(line)
+
+    // Add extra breathing room for conversational messages only.
+    if ((role === 'user' || role === 'assistant') && spacing > 0) {
+      for (let i = 0; i < spacing; i += 1) out.push('')
+    }
+  }
+
+  return out.join('\n')
 }

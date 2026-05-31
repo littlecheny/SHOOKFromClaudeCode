@@ -1,0 +1,11 @@
+{
+  "_readme": [
+    "这个文件保存了 Shook 的 Focus 和 Todos。",
+    "你可以直接编辑 focus 字段（字符串或 null）。",
+    "todos 数组中每一项需要包含 id / content / done。",
+    "保存后在 Shook 中执行 /refresh 即可立即生效。"
+  ],
+  "focus": null,
+  "todos": [],
+  "updatedAt": "2026-05-30T00:00:00.000Z"
+}

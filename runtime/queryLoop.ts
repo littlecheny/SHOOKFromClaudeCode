@@ -2,11 +2,14 @@ import type { ToolDescriptor } from './protocol.js'
 import type { TodoItem } from './statePersistence.js'
 import type { PythonWorkerClient } from './workerClient.js'
 import { ModelClient, type ChatMessage } from './modelClient.js'
+import { buildSystemPrompt } from './systemPrompt.js'
+import process from 'node:process'
 
 export type QueryEvent =
   | { type: 'text'; content: string }
   | { type: 'tool_start'; tool: string; args: unknown }
   | { type: 'tool_result'; tool: string; result: unknown }
+  | { type: 'tool_policy'; tool: string; message: string }
   | { type: 'error'; message: string }
 
 export async function* runQueryLoop(options: {
@@ -22,17 +25,7 @@ export async function* runQueryLoop(options: {
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: [
-        '你是 Shook 的终端智能助手。',
-        '运行环境为 TS 主控 + Python tool worker。',
-        '用户当前看到的是顶部固定 UI 和下方 transcript。',
-        '当且仅当确实需要工具时，输出 JSON 代码块，格式为 {"tool":"工具名","arguments":{...}} 或数组。',
-        '如果不需要工具，直接用中文给出简洁回答。',
-        notes.length > 0 ? `当前工作记忆：\n${notes.map((note, index) => `${index + 1}. ${note}`).join('\n')}` : '当前没有额外工作记忆。',
-        todos.length > 0
-          ? `当前待办：\n${todos.map((todo, index) => `${index + 1}. [${todo.done ? 'x' : ' '}] ${todo.content}`).join('\n')}`
-          : '当前没有待办。',
-      ].join('\n'),
+      content: buildSystemPrompt({ notes, todos }),
     },
   ]
 
@@ -52,7 +45,7 @@ export async function* runQueryLoop(options: {
 
   for (let index = 0; index < 5; index += 1) {
     const result = await modelClient.complete(messages, tools)
-    
+
     if (result.toolCalls.length === 0) {
       if (result.content) {
         yield { type: 'text', content: `Shook: ${result.content}` }
@@ -66,22 +59,40 @@ export async function* runQueryLoop(options: {
       yield { type: 'text', content: `Shook: ${result.content}` }
     }
 
+    // 先推入 assistant 的内容和它所请求的 tool_calls
+    messages.push({
+      role: 'assistant',
+      content: result.content,
+      tool_calls: result.toolCalls,
+    })
+
     for (const call of result.toolCalls) {
+      const descriptor = tools.find(tool => tool.name === call.tool)
+      if (descriptor?.category === 'side_effect' && process.env.SHOOK_ALLOW_SIDE_EFFECT_TOOLS !== '1') {
+        const message = 'side_effect 工具不会在自然语言 agent loop 中自动执行；请使用明确 slash 工作流或设置 SHOOK_ALLOW_SIDE_EFFECT_TOOLS=1。'
+        yield { type: 'tool_policy', tool: call.tool, message }
+        messages.push({ role: 'tool', name: call.tool, content: `Blocked by tool policy: ${message}`, tool_call_id: call.id })
+        continue
+      }
+
+      if (descriptor?.category === 'expensive') {
+        const cost = typeof descriptor.cost_estimate === 'number' ? ` estimated_cost=${descriptor.cost_estimate}` : ''
+        yield { type: 'tool_policy', tool: call.tool, message: `expensive 工具即将执行。${cost}` }
+      }
+
       yield { type: 'tool_start', tool: call.tool, args: call.arguments }
-      
+
       try {
         const toolResult = await workerClient.callTool(call.tool, call.arguments)
         const toolResultText = JSON.stringify(toolResult, null, 2)
         yield { type: 'tool_result', tool: call.tool, result: toolResultText }
-        messages.push({ role: 'tool', name: call.tool, content: toolResultText })
+        messages.push({ role: 'tool', name: call.tool, content: toolResultText, tool_call_id: call.id })
       } catch (error) {
         const errorMessage = (error as Error).message
         yield { type: 'error', message: `工具执行失败: ${errorMessage}` }
-        messages.push({ role: 'tool', name: call.tool, content: `Error: ${errorMessage}` })
+        messages.push({ role: 'tool', name: call.tool, content: `Error: ${errorMessage}`, tool_call_id: call.id })
       }
     }
-
-    messages.push({ role: 'assistant', content: result.content })
 
     const followup = await modelClient.complete(messages, tools)
     if (followup.toolCalls.length === 0) {

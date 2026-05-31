@@ -26,6 +26,7 @@ function InkInput({ state, onSubmit }: InkInputProps) {
     focus: state.focus,
     currentSession: state.currentSession,
     toolsCount: state.tools.length,
+    expanded: state.canvasExpanded,
     width,
   })
 

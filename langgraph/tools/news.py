@@ -4,12 +4,22 @@
 封装 mcp_servers/news_server 的 fetch_feed 和 fetch_feeds 功能
 """
 import logging
+import os
+import socket
+import urllib.error
+import urllib.request
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .base import BaseTool, ToolCategory, ToolResult
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_FEED_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 Shook/0.1 RSS Reader"
+)
+DEFAULT_FEED_ACCEPT = "application/rss+xml, application/atom+xml, application/xml, text/xml, */*"
 
 # 延迟导入，避免依赖问题
 feedparser = None
@@ -25,6 +35,23 @@ def _ensure_deps():
     if date_parser is None:
         from dateutil import parser
         date_parser = parser
+
+
+def _feed_timeout_seconds() -> int:
+    try:
+        return int(os.getenv("SHOOK_FEED_TIMEOUT_SECONDS", "12"))
+    except ValueError:
+        return 12
+
+
+def _format_fetch_error(error: Exception) -> str:
+    if isinstance(error, urllib.error.HTTPError):
+        return f"HTTP {error.code} {error.reason}"
+    if isinstance(error, urllib.error.URLError):
+        return f"URL error: {error.reason}"
+    if isinstance(error, socket.timeout):
+        return "timeout"
+    return str(error)
 
 
 class FetchFeedTool(BaseTool):
@@ -94,8 +121,18 @@ class FetchFeedTool(BaseTool):
         logger.info(f"拉取 feed: {feed_url}")
         
         try:
-            # 解析 RSS/Atom feed
-            feed = feedparser.parse(feed_url)
+            # feedparser.parse(url) 没有稳定超时控制；同时部分站点会拒绝
+            # Python 默认 User-Agent，所以这里显式设置 RSS 读取器请求头。
+            request = urllib.request.Request(
+                feed_url,
+                headers={
+                    "User-Agent": os.getenv("SHOOK_FEED_USER_AGENT", DEFAULT_FEED_USER_AGENT),
+                    "Accept": DEFAULT_FEED_ACCEPT,
+                },
+            )
+            with urllib.request.urlopen(request, timeout=_feed_timeout_seconds()) as response:
+                feed_bytes = response.read()
+            feed = feedparser.parse(feed_bytes)
             
             if feed.bozo:
                 logger.warning(f"Feed 解析警告: {feed.bozo_exception}")
@@ -154,10 +191,11 @@ class FetchFeedTool(BaseTool):
             )
         
         except Exception as e:
-            logger.error(f"拉取 feed 失败: {e}", exc_info=True)
+            error_message = _format_fetch_error(e)
+            logger.warning(f"拉取 feed 失败: {feed_url} - {error_message}")
             return ToolResult(
                 success=False,
-                error=str(e),
+                error=error_message,
                 data={'items': [], 'total': 0}
             )
 
@@ -262,6 +300,7 @@ class FetchFeedsTool(BaseTool):
                 all_items.extend(items)
             else:
                 errors.append({
+                    'name': feed_info.get('name'),
                     'url': feed_url,
                     'error': result.error
                 })

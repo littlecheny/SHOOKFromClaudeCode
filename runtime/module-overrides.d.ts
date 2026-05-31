@@ -7,7 +7,6 @@ declare module './getNews.js' {
     workerClient: PythonWorkerClient
     modelClient: ModelClient
     date?: string
-    dryRun?: boolean
     onLog?: (line: string) => void
   }): Promise<string | null>
 }

@@ -158,7 +158,9 @@ def handle_run_shell(request_id: str, params: dict[str, Any]) -> None:
     if not isinstance(command_line, str) or not command_line.strip():
         raise ValueError('commandLine is required')
 
-    result = run_process(request_id, ['/bin/zsh', '-i', '-c', command_line])
+    # Keep shell commands non-interactive. Loading the user's interactive zshrc can
+    # trigger prompt integrations such as starship and make simple commands hang.
+    result = run_process(request_id, ['/bin/zsh', '-lc', command_line])
     send_response(request_id, True, result)
 
 
@@ -172,6 +174,9 @@ def handle_list_tools(request_id: str) -> None:
                 'name': schema.name,
                 'description': schema.description,
                 'input_schema': schema.input_schema,
+                'category': getattr(schema.category, 'value', str(schema.category)),
+                'cost_estimate': schema.cost_estimate,
+                'reliability': schema.reliability,
             }
         )
     send_response(request_id, True, tools)

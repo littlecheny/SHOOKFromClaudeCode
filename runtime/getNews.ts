@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import process from 'node:process'
 import type { PythonWorkerClient } from './workerClient.js'
 import { ModelClient } from './modelClient.js'
 
@@ -8,11 +9,24 @@ type GetNewsOptions = {
   workerClient: PythonWorkerClient
   modelClient: ModelClient
   date?: string
-  dryRun?: boolean
   onLog?: (line: string) => void
 }
 
 type FeedEntry = { name?: string; url: string }
+type FeedFetchError = { name?: string; url: string; error: string }
+type FeedFetchResult = { items: any[]; errors: FeedFetchError[] }
+
+function defaultReportDate(): string {
+  const timeZone = process.env.SHOOK_TIMEZONE ?? 'Asia/Shanghai'
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
 
 async function loadFeeds(projectRoot: string): Promise<Record<string, FeedEntry[]>> {
   const path = join(projectRoot, 'scripts', 'orchestrator', 'feeds.yaml')
@@ -25,6 +39,14 @@ async function loadFeeds(projectRoot: string): Promise<Record<string, FeedEntry[
   }
   let currentSection: 'ai' | 'jobs' | 'github' | null = null
   let pending: Partial<FeedEntry> = {}
+  const applyField = (line: string): boolean => {
+    const match = line.match(/^(name|url):\s*(?:"(.*?)"|'(.*?)'|(.+))$/)
+    if (!match) return false
+    const value = match[2] ?? match[3] ?? match[4]?.trim() ?? ''
+    if (match[1] === 'name') pending.name = value
+    if (match[1] === 'url') pending.url = value
+    return true
+  }
   const flush = () => {
     if (currentSection && pending.url) {
       result[currentSection].push({ name: pending.name, url: pending.url })
@@ -52,31 +74,47 @@ async function loadFeeds(projectRoot: string): Promise<Record<string, FeedEntry[
     if (line.startsWith('- ')) {
       flush()
       pending = {}
+      const rest = line.slice(2).trim()
+      if (rest) applyField(rest)
       continue
     }
-    const nameMatch = line.match(/^name:\s*"(.*?)"$/)
-    if (nameMatch) {
-      pending.name = nameMatch[1]
-      continue
-    }
-    const urlMatch = line.match(/^url:\s*"(.*?)"$/)
-    if (urlMatch) {
-      pending.url = urlMatch[1]
-      continue
-    }
+    if (applyField(line)) continue
   }
   flush()
   return result
 }
 
-async function fetchCategoryFeeds(workerClient: PythonWorkerClient, feeds: FeedEntry[], limitPerFeed = 20): Promise<any[]> {
-  if (feeds.length === 0) return []
-  const payload = await workerClient.callTool('fetch_feeds', {
+async function fetchCategoryFeeds(workerClient: PythonWorkerClient, feeds: FeedEntry[], limitPerFeed = 20): Promise<FeedFetchResult> {
+  if (feeds.length === 0) return { items: [], errors: [] }
+  const result = await workerClient.callTool('fetch_feeds', {
     feeds,
     since: null,
     limit_per_feed: limitPerFeed,
-  }) as { items?: any[] }
-  return Array.isArray(payload?.items) ? payload.items : []
+  }) as { success?: boolean; data?: { items?: any[]; errors?: FeedFetchError[] }; error?: string }
+  if (!result?.success) {
+    return {
+      items: [],
+      errors: feeds.map(feed => ({
+        name: feed.name,
+        url: feed.url,
+        error: result?.error ?? 'fetch_feeds failed',
+      })),
+    }
+  }
+  const payload = result.data ?? {}
+  return {
+    items: Array.isArray(payload?.items) ? payload.items : [],
+    errors: Array.isArray(payload?.errors) ? payload.errors : [],
+  }
+}
+
+function logFeedResult(section: string, result: FeedFetchResult, onLog?: (line: string) => void): void {
+  const failedCount = result.errors.length
+  onLog?.(`[get-news] ${section}: 拉取 ${result.items.length} 条，失败 ${failedCount} 个源`)
+  for (const error of result.errors.slice(0, 5)) {
+    const label = error.name || error.url
+    onLog?.(`[get-news] ${section} 源失败：${label} - ${error.error}`)
+  }
 }
 
 function buildNewsPrompt(date: string, sections: Record<string, any[]>): string {
@@ -115,14 +153,27 @@ function buildNewsPrompt(date: string, sections: Record<string, any[]>): string 
 }
 
 export async function runGetNews(options: GetNewsOptions): Promise<string | null> {
-  const { projectRoot, workerClient, modelClient, date = new Date().toISOString().slice(0, 10), dryRun = false, onLog } = options
+  const { projectRoot, workerClient, modelClient, onLog } = options
+  const date = options.date || defaultReportDate()
   onLog?.(`[get-news] 加载 feeds 配置`)
   const feedsBySection = await loadFeeds(projectRoot)
   onLog?.(`[get-news] 拉取新闻候选`)
-  const sections = {
+  const fetched = {
     ai: await fetchCategoryFeeds(workerClient, feedsBySection.ai),
     jobs: await fetchCategoryFeeds(workerClient, feedsBySection.jobs),
     github: await fetchCategoryFeeds(workerClient, feedsBySection.github),
+  }
+  logFeedResult('AI', fetched.ai, onLog)
+  logFeedResult('Jobs', fetched.jobs, onLog)
+  logFeedResult('GitHub', fetched.github, onLog)
+  const sections = {
+    ai: fetched.ai.items,
+    jobs: fetched.jobs.items,
+    github: fetched.github.items,
+  }
+  const totalCandidates = sections.ai.length + sections.jobs.length + sections.github.length
+  if (totalCandidates === 0) {
+    throw new Error('未拉取到任何新闻候选，请检查网络连接或 scripts/orchestrator/feeds.yaml')
   }
   onLog?.(`[get-news] 调用模型生成报告`)
   const prompt = buildNewsPrompt(date, sections)
@@ -136,15 +187,5 @@ export async function runGetNews(options: GetNewsOptions): Promise<string | null
   const reportPath = join(reportsDir, `${date}.md`)
   await writeFile(reportPath, report, 'utf8')
   onLog?.(`[get-news] 报告已保存：${reportPath}`)
-  if (!dryRun) {
-    onLog?.(`[get-news] 推送报告到 GitHub`)
-    await workerClient.callTool('commit_and_push', {
-      repo_path: projectRoot,
-      paths: [`reports/${date}.md`],
-      message: `docs: 每日简报 ${date}`,
-    })
-  } else {
-    onLog?.(`[get-news] [DRY RUN] 跳过 GitHub 推送`)
-  }
   return reportPath
 }

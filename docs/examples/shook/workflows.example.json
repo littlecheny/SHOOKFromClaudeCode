@@ -1,0 +1,14 @@
+{
+  "get-news": {
+    "last_run_at": "2026-05-30T08:30:00.000Z",
+    "last_status": "success",
+    "last_output": "reports/2026-05-30.md",
+    "duration_ms": 18200
+  },
+  "predict-btc": {
+    "last_run_at": "2026-05-30T09:10:00.000Z",
+    "last_status": "failed",
+    "last_error": "get_okx_funding_rate timeout",
+    "duration_ms": 9000
+  }
+}

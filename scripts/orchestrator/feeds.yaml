@@ -5,22 +5,25 @@ ai:
   - name: "阮一峰的网络日志"
     url: "http://www.ruanyifeng.com/blog/atom.xml"
   - name: "AINews"
-    url: "https://www.artificialintelligence-news.com/feed/rss"
+    url: "https://www.artificialintelligence-news.com/feed/"
   - name: "OpenAI"
-    url: "https://openai.com/blog/rss.xml"
+    url: "https://openai.com/news/rss.xml"
   - name: "MIT ReviewAI"
     url: "https://www.technologyreview.com/topic/artificial-intelligence/feed"
   - name: "量子位"
     url: "https://www.qbitai.com/feed"
-  - name: "Google AI Blog"
-    url: "https://ai.googleblog.com/feeds/posts/default"
-  - name: "Y Combinator AI Threads"
-    url: "https://news.ycombinator.com/submitted?id=whoishiring&format=rss"
+  - name: "Google DeepMind Blog"
+    url: "https://deepmind.google/blog/rss.xml"
+  - name: "Hugging Face Blog"
+    url: "https://huggingface.co/blog/feed.xml"
+
+jobs:
+  - name: "Hacker News Jobs"
+    url: "https://hnrss.org/jobs"
 
 github:
   - name: "官方博客"
-    url: "https://github.blog/feed"
-  - name: "Trending Repos RSS"
-    url: "https://github.com/trending.rss"
-
+    url: "https://github.blog/feed/"
+  - name: "Show HN"
+    url: "https://hnrss.org/show"
 
