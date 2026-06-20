@@ -52,6 +52,7 @@ type RuntimeState = {
   busy: boolean
   canvasExpanded: boolean
   workflowState: WorkflowStateFile
+  commandHistory: string[]
 }
 
 const RUNTIME_VERSION = '0.1.0'
@@ -1070,6 +1071,7 @@ async function main(): Promise<number> {
       busy: false,
       canvasExpanded: false,
       workflowState,
+      commandHistory: [],
     }
     const latestSnapshot = await loadLatestSnapshot(projectRoot)
     if (latestSnapshot) {

@@ -86,6 +86,7 @@ npm run typecheck
 
 - [当前状态盘点](docs/shook-agent-current-state.md)
 - [个人 Agent 管家改造路线](docs/shook-personal-agent-steward-roadmap.md)
+- [命令索引](docs/commands.md)
 - [新闻工作流](docs/workflows/get-news.md)
 - [BTC 工作流](docs/workflows/predict-btc.md)
 - [Runway 工作流](docs/workflows/runway.md)
