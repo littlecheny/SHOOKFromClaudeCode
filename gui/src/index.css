@@ -1,0 +1,58 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-canvas: #f7f6f3;
+  --color-surface: #ffffff;
+  --color-ink: #111111;
+  --color-muted: #787774;
+  --color-line: #eaeaea;
+
+  /* 海绵宝宝低饱和 accent（热力图色阶：淡黄 → 饱和海绵黄） */
+  --color-sponge-1: #fbf3db;
+  --color-sponge-2: #f3e3a8;
+  --color-sponge-3: #ebcf6f;
+  --color-sponge-4: #e2b93e;
+  --color-sponge-text: #956400;
+
+  --color-patrick-bg: #fbebee;
+  --color-patrick-text: #a34d5e;
+  --color-gary-bg: #e1f0fb;
+  --color-gary-text: #1f6c9f;
+  --color-squid-bg: #e8f1ef;
+  --color-squid-text: #3e6b62;
+
+  --color-week-future: #faf9f6;
+  --color-week-past: #f1efea;
+
+  --font-display: 'Newsreader', Georgia, 'Songti SC', serif;
+  --font-sans: -apple-system, 'SF Pro Display', 'PingFang SC', 'Helvetica Neue', sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, 'Menlo', monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 3px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

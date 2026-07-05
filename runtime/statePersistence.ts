@@ -39,6 +39,22 @@ function getWorkflowStatePath(projectRoot: string): string {
   return join(getShookDir(projectRoot), 'workflows.json')
 }
 
+function getMemoryDir(projectRoot: string): string {
+  return join(getShookDir(projectRoot), 'memory')
+}
+
+function getEssencePath(projectRoot: string): string {
+  return join(getMemoryDir(projectRoot), 'essence.md')
+}
+
+function getChatsDir(projectRoot: string): string {
+  return join(getMemoryDir(projectRoot), 'chats')
+}
+
+function getGoalsDir(projectRoot: string): string {
+  return join(getShookDir(projectRoot), 'goals')
+}
+
 /**
  * 独立的 Todo & Focus 文件结构，便于用户直接手动编辑
  */
@@ -120,12 +136,100 @@ export async function recordWorkflowRun(
   return state
 }
 
+function sanitizeSlug(name: string, fallback: string): string {
+  return name.trim().replace(/[^\w.-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || fallback
+}
+
 function sanitizeSessionName(name: string): string {
-  return name.trim().replace(/[^\w.-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'session'
+  return sanitizeSlug(name, 'session')
 }
 
 export async function ensureStateDirs(projectRoot: string): Promise<void> {
   await mkdir(getSessionsDir(projectRoot), { recursive: true })
+  await mkdir(getMemoryDir(projectRoot), { recursive: true })
+  await mkdir(getChatsDir(projectRoot), { recursive: true })
+  await mkdir(getGoalsDir(projectRoot), { recursive: true })
+}
+
+/**
+ * .shook/memory/essence.md 由外部 agent（Claude Code / Codex 等）利用自身运行态能力写入，
+ * Shook 自己不提取、不抓取聊天记录，只负责留好存储位置并在 /goal 等工作流中读取。
+ */
+export async function loadEssence(projectRoot: string): Promise<string | null> {
+  try {
+    const content = await readFile(getEssencePath(projectRoot), 'utf8')
+    return content.trim() ? content : null
+  } catch {
+    return null
+  }
+}
+
+export type GoalSummary = {
+  name: string
+  totalSteps: number
+  doneSteps: number
+}
+
+const GOAL_CHECKBOX_PATTERN = /^(\s*-\s*\[)([ xX])(\]\s*.*)$/
+
+function goalFileName(name: string): string {
+  return `${sanitizeSlug(name, 'goal')}.md`
+}
+
+export async function saveGoalDocument(projectRoot: string, name: string, content: string): Promise<string> {
+  await ensureStateDirs(projectRoot)
+  const fileName = goalFileName(name)
+  await writeFile(join(getGoalsDir(projectRoot), fileName), content, 'utf8')
+  return fileName.replace(/\.md$/, '')
+}
+
+export async function loadGoalDocument(projectRoot: string, name: string): Promise<string> {
+  await ensureStateDirs(projectRoot)
+  return readFile(join(getGoalsDir(projectRoot), goalFileName(name)), 'utf8')
+}
+
+export async function listGoalDocuments(projectRoot: string): Promise<GoalSummary[]> {
+  await ensureStateDirs(projectRoot)
+  const files = await readdir(getGoalsDir(projectRoot), { withFileTypes: true })
+  const summaries: GoalSummary[] = []
+
+  for (const file of files) {
+    if (!file.isFile() || !file.name.endsWith('.md')) {
+      continue
+    }
+    const content = await readFile(join(getGoalsDir(projectRoot), file.name), 'utf8')
+    const checkboxes = content.split('\n').filter(line => GOAL_CHECKBOX_PATTERN.test(line))
+    summaries.push({
+      name: file.name.replace(/\.md$/, ''),
+      totalSteps: checkboxes.length,
+      doneSteps: checkboxes.filter(line => /\[[xX]\]/.test(line)).length,
+    })
+  }
+
+  return summaries.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export async function toggleGoalStep(projectRoot: string, name: string, stepIndex: number): Promise<string> {
+  const content = await loadGoalDocument(projectRoot, name)
+  const lines = content.split('\n')
+  let seen = 0
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(GOAL_CHECKBOX_PATTERN)
+    if (!match) {
+      continue
+    }
+    seen += 1
+    if (seen === stepIndex) {
+      const isDone = /[xX]/.test(match[2])
+      lines[index] = `${match[1]}${isDone ? ' ' : 'x'}${match[3]}`
+      const updated = lines.join('\n')
+      await writeFile(join(getGoalsDir(projectRoot), goalFileName(name)), updated, 'utf8')
+      return updated
+    }
+  }
+
+  throw new Error(`未找到第 ${stepIndex} 个步骤`)
 }
 
 export async function saveLatestSnapshot(projectRoot: string, snapshot: SessionSnapshot): Promise<void> {

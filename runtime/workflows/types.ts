@@ -2,7 +2,7 @@ import type { CommandRunResult, WorkerStreamEvent } from '../protocol.js'
 import type { ModelClient } from '../modelClient.js'
 import type { PythonWorkerClient } from '../workerClient.js'
 
-export type WorkflowCategory = 'daily' | 'finance' | 'project' | 'writing' | 'system'
+export type WorkflowCategory = 'daily' | 'finance' | 'project' | 'writing' | 'companion' | 'system'
 
 export type WorkflowContext = {
   projectRoot: string

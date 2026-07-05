@@ -3,12 +3,14 @@ import { getNewsWorkflow } from './getNewsWorkflow.js'
 import { predictBtcWorkflow } from './predictBtcWorkflow.js'
 import { runwayWorkflow } from './runwayWorkflow.js'
 import { cockpitWorkflow } from './cockpitWorkflow.js'
+import { goalWorkflow } from './goalWorkflow.js'
 
 const workflows = [
   getNewsWorkflow,
   predictBtcWorkflow,
   runwayWorkflow,
   cockpitWorkflow,
+  goalWorkflow,
 ] satisfies ShookWorkflow[]
 
 const workflowByCommand = new Map<string, ShookWorkflow>()

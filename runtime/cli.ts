@@ -4,22 +4,28 @@ import { dirname, join } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { getCockpitHelp, runCockpitTransform, type CockpitMode } from './cockpit.js'
+import { composeGoalDocument, getGoalHelp, runGoalTurn } from './goal.js'
 import { readInputWithInk } from './inkInput.js'
 import { render as renderMessages } from './messages.js'
-import { ModelClient } from './modelClient.js'
+import { ModelClient, type ChatMessage } from './modelClient.js'
 import type { CommandRunResult, HandshakeResult, ToolDescriptor, WorkerStreamEvent } from './protocol.js'
 import { runQueryLoop } from './queryLoop.js'
 import {
   ensureStateDirs,
+  listGoalDocuments,
   listSavedSessions,
+  loadEssence,
+  loadGoalDocument,
   loadLatestSnapshot,
   loadNamedSession,
   loadTodosFile,
   loadWorkflowState,
   recordWorkflowRun,
+  saveGoalDocument,
   saveLatestSnapshot,
   saveNamedSession,
   saveTodosFile,
+  toggleGoalStep,
   type SessionSnapshot,
   type TodoItem,
   type WorkflowStateFile,
@@ -49,6 +55,8 @@ type RuntimeState = {
   focus: string | null
   currentSession: string | null
   cockpitMode: CockpitMode | null
+  goalMode: boolean
+  goalHistory: ChatMessage[]
   busy: boolean
   canvasExpanded: boolean
   workflowState: WorkflowStateFile
@@ -57,6 +65,7 @@ type RuntimeState = {
 
 const RUNTIME_VERSION = '0.1.0'
 const COCKPIT_COMMANDS = new Set(['cockpit'])
+const GOAL_COMMANDS = new Set(['goal'])
 const RED = '\u001B[31m'
 const LIGHT_RED = '\u001B[38;5;203m'
 const RESET = '\u001B[0m'
@@ -420,6 +429,10 @@ function printHelp(handshake?: HandshakeResult): void {
     '  /predict-btc [--output-dir PATH]            生成 BTC 预测看板',
     '  /cockpit draft|compress|polish [TEXT]       进入/执行草拟-压缩-润色模式',
     '  /cockpit off                                退出 Cockpit 模式',
+    '  /goal start [TEXT]                           进入人生伙伴目标共创对话',
+    '  /goal save [NAME] | /goal off                生成目标文档 / 放弃当前对话',
+    '  /goal list | /goal show NAME                 查看已保存目标 / 目标详情',
+    '  /goal check NAME N                           勾选/取消第 N 个执行步骤',
     '  /runway add --name NAME --path PATH         添加 Runway 项目',
     '  /runway delete --name NAME                  删除 Runway 项目',
     '  /runway list                                列出所有项目',
@@ -681,6 +694,108 @@ async function handleCockpitCommands(
   return true
 }
 
+function formatGoalListing(summaries: { name: string; totalSteps: number; doneSteps: number }[]): string {
+  if (summaries.length === 0) {
+    return '[goal] 还没有保存的目标文档，使用 /goal start 开始共创'
+  }
+  const lines = summaries.map(summary => {
+    const progress = summary.totalSteps > 0 ? `${summary.doneSteps}/${summary.totalSteps}` : '0/0'
+    return `  ${summary.name.padEnd(20)} ${progress}`
+  })
+  return ['[goal] 已保存的目标：', ...lines].join('\n')
+}
+
+async function handleGoalCommands(
+  args: string[],
+  state: RuntimeState,
+  modelClient: ModelClient,
+): Promise<boolean> {
+  const subcommand = args[0]
+  if (!subcommand) {
+    appendTranscript(state, getGoalHelp(state.goalMode))
+    return true
+  }
+
+  if (subcommand === 'off') {
+    state.goalMode = false
+    state.goalHistory = []
+    appendTranscript(state, '[goal] 已退出，未保存')
+    await persistLatestState(state)
+    return true
+  }
+
+  if (subcommand === 'start') {
+    state.goalMode = true
+    state.goalHistory = []
+    appendTranscript(state, '[goal] 已进入目标共创对话，直接输入文本继续，/goal save 结束并生成文档')
+    const inlineText = args.slice(1).join(' ').trim()
+    if (inlineText) {
+      const essence = await loadEssence(state.projectRoot)
+      const reply = await runGoalTurn({ modelClient, essence, history: state.goalHistory, userText: inlineText })
+      state.goalHistory.push({ role: 'user', content: inlineText }, { role: 'assistant', content: reply })
+      appendTranscript(state, `Goal: ${reply}`)
+    }
+    await persistLatestState(state)
+    return true
+  }
+
+  if (subcommand === 'save') {
+    if (!state.goalMode || state.goalHistory.length === 0) {
+      appendTranscript(state, '[goal] 当前没有进行中的对话，先用 /goal start 开始')
+      return true
+    }
+    const name = args.slice(1).join(' ').trim() || `goal-${new Date().toISOString().slice(0, 10)}`
+    const essence = await loadEssence(state.projectRoot)
+    const document = await composeGoalDocument({ modelClient, essence, history: state.goalHistory })
+    const savedAs = await saveGoalDocument(state.projectRoot, name, document)
+    state.goalMode = false
+    state.goalHistory = []
+    appendTranscript(state, `[goal] 已生成目标文档：.shook/goals/${savedAs}.md\n\n${document}`)
+    await persistLatestState(state)
+    return true
+  }
+
+  if (subcommand === 'list') {
+    const summaries = await listGoalDocuments(state.projectRoot)
+    appendTranscript(state, formatGoalListing(summaries))
+    return true
+  }
+
+  if (subcommand === 'show') {
+    const name = args[1]
+    if (!name) {
+      appendTranscript(state, '[goal] 用法：/goal show NAME')
+      return true
+    }
+    try {
+      const content = await loadGoalDocument(state.projectRoot, name)
+      appendTranscript(state, content)
+    } catch (error) {
+      appendTranscript(state, `[goal] 读取失败：${(error as Error).message}`)
+    }
+    return true
+  }
+
+  if (subcommand === 'check') {
+    const name = args[1]
+    const stepIndex = Number.parseInt(args[2] ?? '', 10)
+    if (!name || !Number.isFinite(stepIndex)) {
+      appendTranscript(state, '[goal] 用法：/goal check NAME N')
+      return true
+    }
+    try {
+      await toggleGoalStep(state.projectRoot, name, stepIndex)
+      appendTranscript(state, `[goal] 已更新 ${name} 第 ${stepIndex} 步`)
+    } catch (error) {
+      appendTranscript(state, `[goal] 更新失败：${(error as Error).message}`)
+    }
+    return true
+  }
+
+  appendTranscript(state, getGoalHelp(state.goalMode))
+  return true
+}
+
 async function runRegisteredWorkflow(
   workflowCommand: string,
   args: string[],
@@ -858,6 +973,10 @@ async function runCommand(
         '  /predict-btc [--output-dir PATH]            生成 BTC 预测看板',
         '  /cockpit draft|compress|polish [TEXT]       进入/执行草拟-压缩-润色模式',
         '  /cockpit off                                退出 Cockpit 模式',
+        '  /goal start [TEXT]                           进入人生伙伴目标共创对话',
+        '  /goal save [NAME] | /goal off                生成目标文档 / 放弃当前对话',
+        '  /goal list | /goal show NAME                 查看已保存目标 / 目标详情',
+        '  /goal check NAME N                           勾选/取消第 N 个执行步骤',
         '  /runway add --name NAME --path PATH         添加 Runway 项目',
         '  /runway delete --name NAME                  删除 Runway 项目',
         '  /runway list                                列出所有项目',
@@ -893,6 +1012,11 @@ async function runCommand(
       return { continueRunning: true, exitCode: 0 }
     }
 
+    if (GOAL_COMMANDS.has(normalizedCommand)) {
+      await handleGoalCommands(args, state, modelClient)
+      return { continueRunning: true, exitCode: 0 }
+    }
+
     const workflowOutcome = await runRegisteredWorkflow(normalizedCommand, args, client, state, modelClient, streamWriter, isInteractive, options?.dashboardConfig)
     if (workflowOutcome) {
       return workflowOutcome
@@ -915,6 +1039,15 @@ async function runCommand(
 
   try {
     state.busy = true
+    if (state.goalMode) {
+      const essence = await loadEssence(state.projectRoot)
+      const reply = await runGoalTurn({ modelClient, essence, history: state.goalHistory, userText: trimmed })
+      state.goalHistory.push({ role: 'user', content: trimmed }, { role: 'assistant', content: reply })
+      if (isInteractive) appendTranscript(state, `Goal: ${reply}`)
+      else console.log(`Goal: ${reply}`)
+      await persistLatestState(state)
+      return { continueRunning: true, exitCode: 0 }
+    }
     if (state.cockpitMode) {
       const result = await runCockpitTransform({
         mode: state.cockpitMode,
@@ -1068,6 +1201,8 @@ async function main(): Promise<number> {
       focus: null,
       currentSession: null,
       cockpitMode: null,
+      goalMode: false,
+      goalHistory: [],
       busy: false,
       canvasExpanded: false,
       workflowState,

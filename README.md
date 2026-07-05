@@ -10,6 +10,8 @@ Shook 不定位为 Claude Code / Codex 的替代品。复杂临时代码任务�
 - 个人状态面板：Focus、Todos、会话快照、工作流最近运行状态。
 - 工具协议层：TypeScript runtime 调度 Python 工具资产。
 - 终端产品体验：启动动画、dashboard、Ink 输入和个人化视觉。
+- 人生伙伴：承接用户与 Claude Code / Codex / Claude Desktop 等 agent 的聊天精华（`.shook/memory/essence.md`），并通过 `/goal` 对话式共创目标与执行计划。
+  写入入口除了外部 agent 直接编辑文件，还有一个独立的 [`mcp-memory/`](mcp-memory/) MCP server，可以在 Claude Desktop 对话里直接调用写入。
 
 需求管理工具暂不接入；后续应作为新的固定 workflow 接入。
 
@@ -32,6 +34,8 @@ scripts/shook_worker.py          Python worker 桥接层
   |
   v
 langgraph/tools/                 Python 工具资产层
+
+mcp-memory/                      独立 MCP server，供 Claude Desktop 等客户端写入 .shook/memory/
 ```
 
 ## 固定工作流
@@ -42,6 +46,7 @@ langgraph/tools/                 Python 工具资产层
 | `/predict-btc [--output-dir PATH]` | 拉取市场数据并生成 BTC 简报和 dashboard |
 | `/runway add/delete/list ...` | 管理 Runway 项目路径 |
 | `/cockpit draft/compress/polish` | 文本草拟、压缩、润色模式 |
+| `/goal start/save/off/list/show/check` | 人生伙伴：对话式共创目标，生成执行计划文档 |
 
 工作流状态写入 `.shook/workflows.json`，该文件是本地运行态，不进 Git。
 
@@ -54,6 +59,9 @@ langgraph/tools/                 Python 工具资产层
 .shook/todos.json
 .shook/workflows.json
 .shook/sessions/
+.shook/memory/essence.md   # 由外部 agent 写入的精华档案，Shook 只读
+.shook/memory/chats/       # 原始聊天记录留存目录，Shook 不读写
+.shook/goals/*.md          # /goal 生成的目标文档
 ```
 
 这些文件会随使用变化，默认不跟踪到 Git。可版本化示例位于：
@@ -91,3 +99,4 @@ npm run typecheck
 - [BTC 工作流](docs/workflows/predict-btc.md)
 - [Runway 工作流](docs/workflows/runway.md)
 - [Cockpit 工作流](docs/workflows/cockpit.md)
+- [精华档案 MCP server](mcp-memory/README.md)
