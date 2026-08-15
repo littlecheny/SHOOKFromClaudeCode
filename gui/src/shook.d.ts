@@ -49,12 +49,21 @@ export type WorkflowStatusEvent = {
   error?: string
 }
 
-export type DayCommit = { date: string; count: number }
+export type Mood = 'passion' | 'joy' | 'sadness' | 'greed' | 'wealth' | 'calm' | 'focus' | 'anxiety'
+export type MoodIntensity = 1 | 2 | 3
+
+export type DayCommit = {
+  date: string
+  mood: Mood
+  intensity: MoodIntensity
+  note?: string
+}
 
 export type LifeWeek = {
   weekIndex: number
   startDate: string
   level: 0 | 1 | 2 | 3 | 4
+  dominantMood: Mood | null
   days: DayCommit[]
 }
 
@@ -64,12 +73,14 @@ export type LifeWeeksData = {
   totalWeeks: number
   currentWeekIndex: number
   trackedFromWeek: number
+  todayCommit: DayCommit | null
   weeks: LifeWeek[]
 }
 
 export type ShookApi = {
   getState(): Promise<StatusSnapshot>
   getLifeWeeks(): Promise<LifeWeeksData>
+  saveMoodCommit(commit: DayCommit): Promise<LifeWeeksData>
   listWorkflows(): Promise<WorkflowMeta[]>
   runWorkflow(name: string): Promise<{ ok: true; runId: string } | { ok: false; error: string }>
   openPath(path: string): Promise<string>

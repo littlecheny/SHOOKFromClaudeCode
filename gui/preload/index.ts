@@ -1,6 +1,14 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 type Listener<T> = (payload: T) => void
+type Mood = 'passion' | 'joy' | 'sadness' | 'greed' | 'wealth' | 'calm' | 'focus' | 'anxiety'
+type MoodIntensity = 1 | 2 | 3
+type MoodCommitInput = {
+  date: string
+  mood: Mood
+  intensity: MoodIntensity
+  note?: string
+}
 
 function subscribe<T>(channel: string, callback: Listener<T>): () => void {
   const handler = (_event: IpcRendererEvent, payload: T) => callback(payload)
@@ -11,6 +19,7 @@ function subscribe<T>(channel: string, callback: Listener<T>): () => void {
 const api = {
   getState: () => ipcRenderer.invoke('state:get'),
   getLifeWeeks: () => ipcRenderer.invoke('lifeweeks:get'),
+  saveMoodCommit: (commit: MoodCommitInput) => ipcRenderer.invoke('lifeweeks:commitDay', commit),
   listWorkflows: () => ipcRenderer.invoke('workflow:list'),
   runWorkflow: (name: string) => ipcRenderer.invoke('workflow:run', { name }),
   openPath: (path: string) => ipcRenderer.invoke('open:path', { path }),

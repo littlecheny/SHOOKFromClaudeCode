@@ -70,6 +70,7 @@ export type RuntimeModules = {
     listWorkflows(): ShookWorkflow[]
   }
   statePersistence: {
+    ensureStateDirs(projectRoot: string): Promise<void>
     loadTodosFile(projectRoot: string): Promise<TodosFile | null>
     saveTodosFile(projectRoot: string, data: { focus: string | null; todos: TodoItem[] }): Promise<void>
     loadWorkflowState(projectRoot: string): Promise<WorkflowStateFile>

@@ -68,6 +68,7 @@ npm-cache/
 .shook/sessions/
 .shook/memory/
 .shook/goals/
+.shook/moods/
 
 # Generated news reports
 reports/*.md

@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react'
 import TabBar, { type Screen } from './components/TabBar'
 import StatusScreen from './components/status/StatusScreen'
-import WorkflowsScreen from './components/workflows/WorkflowsScreen'
+import TelemetryScreen from './components/telemetry/TelemetryScreen'
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>('status')
+  const [screen, setScreen] = useState<Screen>('instruments')
 
   useEffect(() => {
     return window.shook.onNavigate(target => {
-      if (target === 'workflows' || target === 'status') setScreen(target)
+      if (target === 'instruments' || target === 'status' || target === 'workflows') {
+        setScreen('instruments')
+      }
+      if (target === 'telemetry' || target === 'life') setScreen('telemetry')
     })
   }, [])
 
@@ -19,7 +22,7 @@ export default function App() {
         <TabBar screen={screen} onChange={setScreen} />
       </header>
       <main className="min-h-0 flex-1 overflow-y-auto">
-        {screen === 'status' ? <StatusScreen /> : <WorkflowsScreen />}
+        {screen === 'instruments' ? <StatusScreen /> : <TelemetryScreen />}
       </main>
     </div>
   )

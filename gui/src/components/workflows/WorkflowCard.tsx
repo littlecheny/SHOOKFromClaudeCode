@@ -69,7 +69,7 @@ export default function WorkflowCard({
         )}
       </div>
       {(error || (lastStatus === 'failed' && lastError && !running)) && (
-        <div className="mx-4 mb-3 rounded-md bg-patrick-bg px-3 py-2 text-[11px] leading-snug text-patrick-text">
+        <div className="mx-4 mb-3 rounded-md bg-patrick-1 px-3 py-2 text-[11px] leading-snug text-patrick-text">
           {error ?? lastError}
         </div>
       )}

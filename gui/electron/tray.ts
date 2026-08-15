@@ -15,6 +15,7 @@ export function createTray(win: BrowserWindow): Tray {
   const icon = nativeImage.createFromPath(resolveIconPath())
   icon.setTemplateImage(true)
   tray = new Tray(icon)
+  tray.setTitle('shook')
   tray.setToolTip('shook')
 
   tray.on('click', () => toggleWindow(win))
@@ -48,5 +49,5 @@ export function showWindowUnderTray(win: BrowserWindow): void {
 }
 
 export function setTrayBusy(busy: boolean): void {
-  tray?.setTitle(busy ? ' ●' : '')
+  tray?.setTitle(busy ? 'shook ●' : 'shook')
 }

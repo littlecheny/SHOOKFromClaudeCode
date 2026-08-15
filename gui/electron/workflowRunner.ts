@@ -136,7 +136,7 @@ function notifyCompletion(deps: RunnerDeps, terminal: WorkflowStatusPayload): vo
   })
   notification.on('click', () => {
     deps.showWindow()
-    deps.send('ui:navigate', 'workflows')
+    deps.send('ui:navigate', 'instruments')
   })
   notification.show()
 }

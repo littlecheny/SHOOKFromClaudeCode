@@ -1,8 +1,7 @@
 import { useShookState } from '../../hooks/useShookState'
 import FocusCard from './FocusCard'
 import TodoList from './TodoList'
-import WorkflowPulse from './WorkflowPulse'
-import LifeGrid from './LifeGrid'
+import WorkflowLauncher from '../workflows/WorkflowLauncher'
 
 export default function StatusScreen() {
   const snapshot = useShookState()
@@ -15,8 +14,7 @@ export default function StatusScreen() {
     <div className="flex flex-col gap-5 px-6 py-5">
       <FocusCard focus={snapshot.focus} />
       <TodoList todos={snapshot.todos} />
-      <WorkflowPulse workflows={snapshot.workflows} />
-      <LifeGrid />
+      <WorkflowLauncher />
     </div>
   )
 }

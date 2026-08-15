@@ -55,6 +55,10 @@ function getGoalsDir(projectRoot: string): string {
   return join(getShookDir(projectRoot), 'goals')
 }
 
+function getMoodsDir(projectRoot: string): string {
+  return join(getShookDir(projectRoot), 'moods')
+}
+
 /**
  * 独立的 Todo & Focus 文件结构，便于用户直接手动编辑
  */
@@ -149,6 +153,7 @@ export async function ensureStateDirs(projectRoot: string): Promise<void> {
   await mkdir(getMemoryDir(projectRoot), { recursive: true })
   await mkdir(getChatsDir(projectRoot), { recursive: true })
   await mkdir(getGoalsDir(projectRoot), { recursive: true })
+  await mkdir(getMoodsDir(projectRoot), { recursive: true })
 }
 
 /**

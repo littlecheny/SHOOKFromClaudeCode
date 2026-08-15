@@ -7,19 +7,54 @@
   --color-muted: #787774;
   --color-line: #eaeaea;
 
-  /* 海绵宝宝低饱和 accent（热力图色阶：淡黄 → 饱和海绵黄） */
+  /* 心情角色色带（淡 → 饱和），用于四千周热力图和轻量 tag。 */
   --color-sponge-1: #fbf3db;
   --color-sponge-2: #f3e3a8;
   --color-sponge-3: #ebcf6f;
   --color-sponge-4: #e2b93e;
   --color-sponge-text: #956400;
 
-  --color-patrick-bg: #fbebee;
+  --color-patrick-1: #fbe7ec;
+  --color-patrick-2: #f4cdd8;
+  --color-patrick-3: #e9a6b8;
+  --color-patrick-4: #d97a95;
   --color-patrick-text: #a34d5e;
-  --color-gary-bg: #e1f0fb;
-  --color-gary-text: #1f6c9f;
-  --color-squid-bg: #e8f1ef;
+
+  --color-squid-1: #e6f0ee;
+  --color-squid-2: #c3ddd7;
+  --color-squid-3: #93c2b8;
+  --color-squid-4: #5fa093;
   --color-squid-text: #3e6b62;
+
+  --color-plankton-1: #e9f2e4;
+  --color-plankton-2: #cfe4c4;
+  --color-plankton-3: #a9cf98;
+  --color-plankton-4: #7bb267;
+  --color-plankton-text: #4c7a3c;
+
+  --color-krabs-1: #fae8e0;
+  --color-krabs-2: #f2cdbd;
+  --color-krabs-3: #e5a288;
+  --color-krabs-4: #cf7355;
+  --color-krabs-text: #a6522f;
+
+  --color-gary-1: #e1f0fb;
+  --color-gary-2: #c2ddf2;
+  --color-gary-3: #93c2e6;
+  --color-gary-4: #5b9fd6;
+  --color-gary-text: #1f6c9f;
+
+  --color-sandy-1: #f2ecdf;
+  --color-sandy-2: #e2d3b6;
+  --color-sandy-3: #ccb182;
+  --color-sandy-4: #b08f52;
+  --color-sandy-text: #856b3a;
+
+  --color-puff-1: #f4efe6;
+  --color-puff-2: #e6dcc6;
+  --color-puff-3: #d0c09a;
+  --color-puff-4: #b3a06f;
+  --color-puff-text: #8a7a55;
 
   --color-week-future: #faf9f6;
   --color-week-past: #f1efea;

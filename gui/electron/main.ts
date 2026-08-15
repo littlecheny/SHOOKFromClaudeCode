@@ -21,6 +21,7 @@ app.whenReady().then(async () => {
   }
 
   const runtime: RuntimeModules = await loadRuntime()
+  await runtime.statePersistence.ensureStateDirs(PROJECT_ROOT)
   const { PythonWorkerClient } = runtime.workerClient
   const { ModelClient } = runtime.modelClient
   workerClient = new PythonWorkerClient(PROJECT_ROOT)

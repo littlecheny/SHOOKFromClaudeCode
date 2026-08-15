@@ -1,0 +1,8 @@
+[
+  { "date": "2026-07-01", "mood": "focus", "intensity": 2, "note": "重构四千周数据层" },
+  { "date": "2026-07-02", "mood": "passion", "intensity": 3, "note": "配色一次就对了" },
+  { "date": "2026-07-03", "mood": "anxiety", "intensity": 2 },
+  { "date": "2026-07-04", "mood": "joy", "intensity": 3, "note": "周五放松" },
+  { "date": "2026-07-06", "mood": "wealth", "intensity": 1, "note": "季度奖金到账" },
+  { "date": "2026-07-07", "mood": "calm", "intensity": 1 }
+]
